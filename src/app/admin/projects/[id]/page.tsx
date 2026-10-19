@@ -16,6 +16,9 @@ import { sendQuestionnaire } from "../../questionnaires/actions";
 import type { Questionnaire, QuestionnaireTemplate } from "../../questionnaires/types";
 import type { Quote } from "../../quotes/types";
 import { ConfirmButton } from "@/app/admin/_components/confirm-button";
+import { cancelBooking, createManualBooking } from "../../bookings/actions";
+import type { SessionType } from "../../session-types/types";
+import { BUSINESS_TIME_ZONE } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +43,15 @@ function Pill({ tone, label }: { tone: Tone; label: string }) {
   return <span className={`st ${tone}`}>{label}</span>;
 }
 
-export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProjectDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ booking_error?: string }>;
+}) {
   const { id } = await params;
+  const { booking_error: bookingError } = await searchParams;
 
   const db = supabaseAdmin();
   const [
@@ -55,6 +65,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     { data: quotes, error: quotesError },
     { data: galleries, error: galleriesError },
     { data: emails, error: emailsError },
+    { data: bookings, error: bookingsError },
+    { data: sessionTypes, error: sessionTypesError },
   ] = await Promise.all([
     db.from("projects").select("*, contacts(id, name, email)").eq("id", id).single(),
     db.from("project_stages").select("*").order("position", { ascending: true }),
@@ -71,6 +83,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       .eq("project_id", id)
       .order("created_at", { ascending: false })
       .limit(20),
+    db
+      .from("bookings")
+      .select("id, status, starts_at, timezone, hold_expires_at, session_types(name)")
+      .eq("project_id", id)
+      .order("starts_at", { ascending: true }),
+    db.from("session_types").select("id, name, duration_minutes, price_cents").eq("active", true).order("name", { ascending: true }),
   ]);
   if (error || !data) notFound();
   if (stagesError) throw stagesError;
@@ -91,6 +109,17 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const quoteRows = (quotes ?? []) as Quote[];
   const stageList = (stages ?? []) as ProjectStage[];
   const stage = stageList.find((s) => s.id === project.stage_id);
+  // Sessions are a side section: if the bookings table isn't migrated, say so
+  // instead of taking the page down. Expired unpaid holds aren't sessions.
+  const bookingRows = ((bookings ?? []) as unknown as {
+    id: string;
+    status: string;
+    starts_at: string;
+    timezone: string;
+    hold_expires_at: string;
+    session_types: { name: string } | null;
+  }[]).filter((b) => b.status !== "pending_payment" || new Date(b.hold_expires_at).getTime() > Date.now());
+  const typeOptions = (sessionTypes ?? []) as Pick<SessionType, "id" | "name" | "duration_minutes" | "price_cents">[];
 
   // Payment summary (2.5). Schedules live in invoice_installments (2.4).
   let installments: SummaryInstallment[] = [];
@@ -121,6 +150,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const deleteThisProject = deleteProject.bind(null, project.id, project.contact_id);
   const generateThisContract = generateContract.bind(null, project.id);
   const sendThisQuestionnaire = sendQuestionnaire.bind(null, project.id);
+  const addThisBooking = createManualBooking.bind(null, project.id);
 
   return (
     <main className="fluid workspace">
@@ -192,6 +222,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <div className="ws-main">
           <nav className="ws-jump" aria-label="Sections">
             <a href="#attention">Overview</a>
+            <a href="#sessions">Sessions</a>
             <a href="#money">Money</a>
             <a href="#documents">Documents</a>
             <a href="#gallery">Gallery</a>
@@ -216,6 +247,79 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   </li>
                 ))}
               </ul>
+            )}
+          </section>
+
+          <section id="sessions" className="ws-sec">
+            <h3>Sessions</h3>
+            {bookingError && (
+              <p className="late" role="alert">
+                {bookingError}
+              </p>
+            )}
+            {bookingsError ? (
+              <p className="muted">Bookings aren&apos;t available yet (run the booking migrations).</p>
+            ) : bookingRows.length === 0 ? (
+              <p className="muted">No sessions booked yet.</p>
+            ) : (
+              <ul className="ws-rows">
+                {bookingRows.map((b) => (
+                  <li key={b.id}>
+                    <Pill
+                      tone={b.status === "confirmed" ? "green" : b.status === "canceled" ? "grey" : "amber"}
+                      label={b.status === "confirmed" ? "Confirmed" : b.status === "canceled" ? "Canceled" : "Awaiting payment"}
+                    />
+                    <span className="grow">
+                      {b.session_types?.name ?? "Session"}{" "}
+                      <span className="muted">
+                        ·{" "}
+                        {new Date(b.starts_at).toLocaleString("en-US", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                          timeZone: b.timezone,
+                        })}
+                      </span>
+                    </span>
+                    {b.status !== "canceled" && (
+                      <form action={cancelBooking.bind(null, b.id)}>
+                        <ConfirmButton message="Cancel this booking? It comes off your Google Calendar. Any refund is done in Stripe by hand.">
+                          Cancel
+                        </ConfirmButton>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {sessionTypesError ? (
+              <p className="muted">Session types couldn&apos;t be loaded.</p>
+            ) : !project.contacts ? (
+              <p className="muted">Link a client to this project before adding a booking.</p>
+            ) : typeOptions.length === 0 ? (
+              <p className="muted">
+                Create a session type first (<Link href="/admin/session-types">Session types</Link>).
+              </p>
+            ) : (
+              <div className="ws-tools">
+                <form action={addThisBooking}>
+                  <label htmlFor="booking_type">Add a booking</label>
+                  <select id="booking_type" name="session_type_id" required>
+                    {typeOptions.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.duration_minutes} min)
+                      </option>
+                    ))}
+                  </select>
+                  <input type="date" name="date" aria-label="Date" required />
+                  <input type="time" name="time" aria-label="Start time" required />
+                  <input type="text" name="notes" aria-label="Notes" placeholder="Notes (optional)" maxLength={2000} />
+                  <button type="submit">Add booking</button>
+                </form>
+                <p className="muted small">
+                  Times are {BUSINESS_TIME_ZONE.replace("_", " ")}. Any time works, even outside your open hours. It&apos;s
+                  confirmed right away, goes on your Google Calendar, and a draft invoice is created for you to edit and send.
+                </p>
+              </div>
             )}
           </section>
 

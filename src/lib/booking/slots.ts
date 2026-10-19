@@ -102,6 +102,30 @@ export function parseTimeOfDay(value: string): number {
   return minutes;
 }
 
+// The real instant for a wall-clock date ("YYYY-MM-DD") and time ("HH:MM") in
+// `timeZone`, for a time David types in by hand. Null if the input is
+// malformed or the time doesn't exist (skipped by a spring-forward change).
+// An ambiguous fall-back time resolves to the earlier instant, the same rule
+// the slot generator uses.
+export function zonedTimeToInstant(date: string, time: string, timeZone: string): Date | null {
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim());
+  if (!d || !isValidTimeZone(timeZone)) return null;
+  const [y, m, day] = [Number(d[1]), Number(d[2]), Number(d[3])];
+  let minutes: number;
+  try {
+    minutes = parseTimeOfDay(time);
+  } catch {
+    return null;
+  }
+  if (minutes >= 24 * 60) return null;
+  const local = Date.UTC(y, m - 1, day, 0, minutes);
+  // Rejects dates like 2026-02-31, which Date.UTC would roll over.
+  const check = new Date(local);
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m - 1 || check.getUTCDate() !== day) return null;
+  const { exact } = resolveLocal(local, timeZone);
+  return exact === null ? null : new Date(exact);
+}
+
 export function isValidTimeZone(timeZone: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone });
