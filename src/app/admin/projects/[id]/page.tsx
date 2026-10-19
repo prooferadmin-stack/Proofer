@@ -182,6 +182,21 @@ export default async function ProjectDetailPage({
       <header className="ws-head">
         <h1>{project.title}</h1>
         <div className="ws-meta">
+          <details className="ws-edit">
+            <summary className="btn sm">Edit details</summary>
+            <div className="ws-edit-panel">
+              <form action={updateThisProject}>
+                <ProjectFields project={project} stages={stageList} />
+                <button type="submit" className="primary">
+                  Save changes
+                </button>
+              </form>
+              <form action={deleteThisProject}>
+                <ConfirmButton message="Delete this project? This can't be undone.">Delete project</ConfirmButton>
+              </form>
+            </div>
+          </details>
+
           {stage && <span className="st stage">{stage.name}</span>}
           {project.event_date && <span>{formatDay(project.event_date)}</span>}
           {project.location && <span>{project.location}</span>}
@@ -228,18 +243,6 @@ export default async function ProjectDetailPage({
               </Link>
             </div>
           )}
-          <details className="ws-edit">
-            <summary className="btn">Edit details</summary>
-            <form action={updateThisProject}>
-              <ProjectFields project={project} stages={stageList} />
-              <button type="submit" className="primary">
-                Save changes
-              </button>
-            </form>
-            <form action={deleteThisProject}>
-              <ConfirmButton message="Delete this project? This can't be undone.">Delete project</ConfirmButton>
-            </form>
-          </details>
         </aside>
 
         <div className="ws-main">
