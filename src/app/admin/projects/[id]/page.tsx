@@ -39,6 +39,17 @@ const contractPill: Record<string, [Tone, string]> = {
 };
 const quotePill: Record<string, [Tone, string]> = { draft: ["blue", "Draft"], sent: ["amber", "Sent"], accepted: ["green", "Accepted"] };
 
+// The sections are grouped into tabs (2026-10-19) so the page shows one
+// topic at a time. The tab lives in ?tab= so it survives reloads and links.
+const TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "money", label: "Money" },
+  { key: "documents", label: "Documents" },
+  { key: "gallery", label: "Gallery" },
+  { key: "activity", label: "Activity" },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
+
 function Pill({ tone, label }: { tone: Tone; label: string }) {
   return <span className={`st ${tone}`}>{label}</span>;
 }
@@ -48,10 +59,11 @@ export default async function ProjectDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ booking_error?: string }>;
+  searchParams: Promise<{ booking_error?: string; tab?: string }>;
 }) {
   const { id } = await params;
-  const { booking_error: bookingError } = await searchParams;
+  const { booking_error: bookingError, tab: tabParam } = await searchParams;
+  const tab: TabKey = TABS.some((t) => t.key === tabParam) ? (tabParam as TabKey) : "overview";
 
   const db = supabaseAdmin();
   const [
@@ -152,6 +164,14 @@ export default async function ProjectDetailPage({
   const sendThisQuestionnaire = sendQuestionnaire.bind(null, project.id);
   const addThisBooking = createManualBooking.bind(null, project.id);
 
+  const tabCounts: Record<TabKey, number> = {
+    overview: attention.length,
+    money: invoiceRows.length,
+    documents: contractRows.length + questionnaireRows.length + quoteRows.length,
+    gallery: (galleries ?? []).length,
+    activity: (emails ?? []).length + (project.description ? 1 : 0),
+  };
+
   return (
     <main className="fluid workspace">
       <Link className="back" href="/admin">
@@ -220,16 +240,22 @@ export default async function ProjectDetailPage({
         </aside>
 
         <div className="ws-main">
-          <nav className="ws-jump" aria-label="Sections">
-            <a href="#attention">Overview</a>
-            <a href="#sessions">Sessions</a>
-            <a href="#money">Money</a>
-            <a href="#documents">Documents</a>
-            <a href="#gallery">Gallery</a>
-            <a href="#emails">Emails</a>
-            {project.description && <a href="#notes">Notes</a>}
+          <nav className="ws-tabs" aria-label="Sections">
+            {TABS.map((t) => (
+              <Link
+                key={t.key}
+                href={t.key === "overview" ? `/admin/projects/${project.id}` : `/admin/projects/${project.id}?tab=${t.key}`}
+                className={t.key === tab ? "on" : undefined}
+                aria-current={t.key === tab ? "page" : undefined}
+              >
+                {t.label}
+                {tabCounts[t.key] > 0 && <span className="count">{tabCounts[t.key]}</span>}
+              </Link>
+            ))}
           </nav>
 
+          {tab === "overview" && (
+          <>
           <section id="attention" className="ws-sec">
             <h3>Needs attention</h3>
             {attention.length === 0 ? (
@@ -281,7 +307,7 @@ export default async function ProjectDetailPage({
                       </span>
                     </span>
                     {b.status !== "canceled" && (
-                      <form action={cancelBooking.bind(null, b.id)}>
+                      <form action={cancelBooking.bind(null, b.id)} className="row-action">
                         <ConfirmButton message="Cancel this booking? It comes off your Google Calendar. Any refund is done in Stripe by hand.">
                           Cancel
                         </ConfirmButton>
@@ -300,29 +326,35 @@ export default async function ProjectDetailPage({
                 Create a session type first (<Link href="/admin/session-types">Session types</Link>).
               </p>
             ) : (
-              <div className="ws-tools">
-                <form action={addThisBooking}>
-                  <label htmlFor="booking_type">Add a booking</label>
-                  <select id="booking_type" name="session_type_id" required>
-                    {typeOptions.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.duration_minutes} min)
-                      </option>
-                    ))}
-                  </select>
-                  <input type="date" name="date" aria-label="Date" required />
-                  <input type="time" name="time" aria-label="Start time" required />
-                  <input type="text" name="notes" aria-label="Notes" placeholder="Notes (optional)" maxLength={2000} />
-                  <button type="submit">Add booking</button>
-                </form>
-                <p className="muted small">
-                  Times are {BUSINESS_TIME_ZONE.replace("_", " ")}. Any time works, even outside your open hours. It&apos;s
-                  confirmed right away, goes on your Google Calendar, and a draft invoice is created for you to edit and send.
-                </p>
-              </div>
+              <details className="ws-add" open={Boolean(bookingError)}>
+                <summary className="btn sm">+ Add a booking</summary>
+                <div className="ws-tools">
+                  <form action={addThisBooking}>
+                    <label htmlFor="booking_type">Session type</label>
+                    <select id="booking_type" name="session_type_id" required>
+                      {typeOptions.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.duration_minutes} min)
+                        </option>
+                      ))}
+                    </select>
+                    <input type="date" name="date" aria-label="Date" required />
+                    <input type="time" name="time" aria-label="Start time" required />
+                    <input type="text" name="notes" aria-label="Notes" placeholder="Notes (optional)" maxLength={2000} />
+                    <button type="submit">Add booking</button>
+                  </form>
+                  <p className="muted small">
+                    Times are {BUSINESS_TIME_ZONE.replace("_", " ")}. Any time works, even outside your open hours. It&apos;s
+                    confirmed right away, goes on your Google Calendar, and a draft invoice is created for you to edit and send.
+                  </p>
+                </div>
+              </details>
             )}
           </section>
+          </>
+          )}
 
+          {tab === "money" && (
           <section id="money" className="ws-sec">
             <div className="ws-sechead">
               <h3>Money</h3>
@@ -349,7 +381,9 @@ export default async function ProjectDetailPage({
               </ul>
             )}
           </section>
+          )}
 
+          {tab === "documents" && (
           <section id="documents" className="ws-sec">
             <div className="ws-sechead">
               <h3>Documents</h3>
@@ -396,6 +430,8 @@ export default async function ProjectDetailPage({
               </ul>
             )}
             {project.contacts ? (
+              <details className="ws-add">
+              <summary className="btn sm">+ Contract or questionnaire from a template</summary>
               <div className="ws-tools">
                 <form action={generateThisContract}>
                   <label htmlFor="template_id">Contract from template</label>
@@ -420,11 +456,14 @@ export default async function ProjectDetailPage({
                   <button type="submit">Send</button>
                 </form>
               </div>
+              </details>
             ) : (
               <p className="muted">Link a client to this project before sending a contract or questionnaire.</p>
             )}
           </section>
+          )}
 
+          {tab === "gallery" && (
           <section id="gallery" className="ws-sec">
             <div className="ws-sechead">
               <h3>Gallery</h3>
@@ -448,7 +487,10 @@ export default async function ProjectDetailPage({
               </ul>
             )}
           </section>
+          )}
 
+          {tab === "activity" && (
+          <>
           <section id="emails" className="ws-sec">
             <div className="ws-sechead">
               <h3>Emails</h3>
@@ -484,6 +526,8 @@ export default async function ProjectDetailPage({
               <h3>Notes</h3>
               <p style={{ whiteSpace: "pre-wrap" }}>{project.description}</p>
             </section>
+          )}
+          </>
           )}
         </div>
       </div>

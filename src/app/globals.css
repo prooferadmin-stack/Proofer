@@ -621,9 +621,29 @@ body > main:not(.wide) button[type="submit"]:hover { filter: brightness(0.9); }
 .ws-jump { position: sticky; top: var(--top-h); z-index: 5; display: flex; flex-wrap: wrap; gap: var(--sp-5); padding: 10px 0; background: var(--bg); border-bottom: 1px solid var(--bd-hi); }
 .ws-jump a:hover { color: var(--t1); text-decoration: none; }
 .ws-sec { scroll-margin-top: calc(var(--top-h) + 56px); }
-.ws-sec h3 { margin: 0 0 var(--sp-2); }
+/* Section titles read as real headings, not the small grey label that `main h3` gives. */
+.ws-sec h3 { margin: 0 0 var(--sp-3); font-size: 18px; font-weight: 650; letter-spacing: -0.2px; text-transform: none; color: var(--t1); }
+.ws-sec + .ws-sec { padding-top: var(--sp-5); border-top: 1px solid var(--bd-hi); }
 .ws-sechead { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-2); }
 .ws-sechead h3 { margin: 0; }
+.ws-sec .muted:only-child { padding: var(--sp-3) 0; }
+/* Tabs replace the old jump links: one topic on screen at a time. */
+.ws-tabs { position: sticky; top: var(--top-h); z-index: 5; display: flex; flex-wrap: wrap; gap: var(--sp-5); padding: 10px 0 0; background: var(--bg); border-bottom: 1px solid var(--bd-hi); }
+.ws-tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0 10px; font-size: var(--fs-sm); font-weight: 500; color: var(--t2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ws-tabs a:hover { color: var(--t1); text-decoration: none; }
+.ws-tabs a.on { color: var(--t1); font-weight: 650; border-bottom-color: var(--acc); }
+.ws-tabs .count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--s3); color: var(--t2); font-size: 12px; font-weight: 600; text-align: center; line-height: 20px; }
+.ws-tabs a.on .count { background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--t1); }
+/* Collapsed add-forms: the form only appears when asked for. */
+.ws-add { margin-top: var(--sp-3); }
+.ws-add > summary { list-style: none; display: inline-block; cursor: pointer; }
+.ws-add > summary::-webkit-details-marker { display: none; }
+.ws-add[open] > summary { margin-bottom: var(--sp-2); }
+/* Secondary row actions stay out of sight until the row is hovered or focused. */
+@media (hover: hover) {
+  .ws-rows li .row-action { opacity: 0; transition: opacity 0.12s; }
+  .ws-rows li:hover .row-action, .ws-rows li:focus-within .row-action { opacity: 1; }
+}
 .ws-rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--bd-hi); }
 .ws-rows li { display: flex; align-items: center; gap: var(--sp-3); min-height: 48px; padding: 6px 4px; border-bottom: 1px solid var(--bd); margin: 0; }
 .ws-rows .grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
