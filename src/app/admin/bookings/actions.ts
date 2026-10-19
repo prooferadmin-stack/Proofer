@@ -32,7 +32,7 @@ export async function cancelBooking(id: string) {
 const MAX_BOOKING_NOTES = 2000;
 
 function bookingFailed(projectId: string, message: string): never {
-  redirect(`/admin/projects/${projectId}?booking_error=${encodeURIComponent(message)}#sessions`);
+  redirect(`/admin/projects/${projectId}?tab=sessions&booking_error=${encodeURIComponent(message)}`);
 }
 
 // David adds a session by hand (phone, text, in person). It is confirmed on
@@ -137,5 +137,5 @@ export async function createManualBooking(projectId: string, formData: FormData)
   revalidatePath("/admin/bookings");
   revalidatePath(`/admin/projects/${project.id}`);
   if (problems.length > 0) bookingFailed(projectId, `Booking saved, but ${problems.join(" and ")}.`);
-  redirect(`/admin/projects/${project.id}#sessions`);
+  redirect(`/admin/projects/${project.id}?tab=sessions`);
 }

@@ -43,6 +43,7 @@ const quotePill: Record<string, [Tone, string]> = { draft: ["blue", "Draft"], se
 // topic at a time. The tab lives in ?tab= so it survives reloads and links.
 const TABS = [
   { key: "overview", label: "Overview" },
+  { key: "sessions", label: "Sessions" },
   { key: "money", label: "Money" },
   { key: "documents", label: "Documents" },
   { key: "gallery", label: "Gallery" },
@@ -166,6 +167,7 @@ export default async function ProjectDetailPage({
 
   const tabCounts: Record<TabKey, number> = {
     overview: attention.length,
+    sessions: bookingRows.filter((b) => b.status !== "canceled").length,
     money: invoiceRows.length,
     documents: contractRows.length + questionnaireRows.length + quoteRows.length,
     gallery: (galleries ?? []).length,
@@ -186,6 +188,20 @@ export default async function ProjectDetailPage({
           {project.type && <span>{project.type}</span>}
         </div>
       </header>
+
+      <nav className="ws-tabs" aria-label="Sections">
+        {TABS.map((t) => (
+          <Link
+            key={t.key}
+            href={t.key === "overview" ? `/admin/projects/${project.id}` : `/admin/projects/${project.id}?tab=${t.key}`}
+            className={t.key === tab ? "on" : undefined}
+            aria-current={t.key === tab ? "page" : undefined}
+          >
+            {t.label}
+            {tabCounts[t.key] > 0 && <span className="count">{tabCounts[t.key]}</span>}
+          </Link>
+        ))}
+      </nav>
 
       <div className="ws">
         <aside className="ws-side" aria-label="Summary">
@@ -240,22 +256,7 @@ export default async function ProjectDetailPage({
         </aside>
 
         <div className="ws-main">
-          <nav className="ws-tabs" aria-label="Sections">
-            {TABS.map((t) => (
-              <Link
-                key={t.key}
-                href={t.key === "overview" ? `/admin/projects/${project.id}` : `/admin/projects/${project.id}?tab=${t.key}`}
-                className={t.key === tab ? "on" : undefined}
-                aria-current={t.key === tab ? "page" : undefined}
-              >
-                {t.label}
-                {tabCounts[t.key] > 0 && <span className="count">{tabCounts[t.key]}</span>}
-              </Link>
-            ))}
-          </nav>
-
           {tab === "overview" && (
-          <>
           <section id="attention" className="ws-sec">
             <h3>Needs attention</h3>
             {attention.length === 0 ? (
@@ -275,7 +276,9 @@ export default async function ProjectDetailPage({
               </ul>
             )}
           </section>
+          )}
 
+          {tab === "sessions" && (
           <section id="sessions" className="ws-sec">
             <h3>Sessions</h3>
             {bookingError && (
@@ -351,7 +354,6 @@ export default async function ProjectDetailPage({
               </details>
             )}
           </section>
-          </>
           )}
 
           {tab === "money" && (
