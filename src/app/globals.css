@@ -604,7 +604,10 @@ body > main:not(.wide) button[type="submit"]:hover { filter: brightness(0.9); }
 .ws-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--t2); font-size: var(--fs-sm); }
 .ws { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--sp-6); align-items: start; margin-top: var(--sp-4); }
 .ws-side { position: sticky; top: calc(var(--top-h) + var(--sp-4)); display: flex; flex-direction: column; gap: var(--sp-4); }
-.ws-facts { margin: 0; border-top: 1px solid var(--bd-hi); }
+.ws-facts { margin: 0; }
+/* The summary column starts level with the tab underline (tab bar is 44px tall). */
+.ws-side { padding-top: 44px; }
+.ws-facts { border-top: 1px solid var(--bd-hi); }
 .ws-facts div { display: flex; justify-content: space-between; gap: var(--sp-3); padding: 10px 0; border-bottom: 1px solid var(--bd); }
 .ws-facts dt { color: var(--t2); font-size: var(--fs-sm); }
 .ws-facts dd { margin: 0; text-align: right; font-size: var(--fs-sm); font-weight: 600; display: flex; flex-direction: column; align-items: flex-end; }
@@ -628,8 +631,8 @@ body > main:not(.wide) button[type="submit"]:hover { filter: brightness(0.9); }
 .ws-sechead h3 { margin: 0; }
 .ws-sec .muted:only-child { padding: var(--sp-3) 0; }
 /* Tabs replace the old jump links: one topic on screen at a time. */
-.ws-tabs { position: sticky; top: var(--top-h); z-index: 5; display: flex; flex-wrap: wrap; gap: var(--sp-5); padding: 10px 0 0; background: var(--bg); border-bottom: 1px solid var(--bd-hi); }
-.ws-tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0 10px; font-size: var(--fs-sm); font-weight: 500; color: var(--t2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ws-tabs { position: sticky; top: var(--top-h); z-index: 5; box-sizing: border-box; height: 44px; display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--sp-5); background: var(--bg); border-bottom: 1px solid var(--bd-hi); }
+.ws-tabs a { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 500; color: var(--t2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .ws-tabs a:hover { color: var(--t1); text-decoration: none; }
 .ws-tabs a.on { color: var(--t1); font-weight: 650; border-bottom-color: var(--acc); }
 .ws-tabs .count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--s3); color: var(--t2); font-size: 12px; font-weight: 600; text-align: center; line-height: 20px; }

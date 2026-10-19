@@ -189,19 +189,6 @@ export default async function ProjectDetailPage({
         </div>
       </header>
 
-      <nav className="ws-tabs" aria-label="Sections">
-        {TABS.map((t) => (
-          <Link
-            key={t.key}
-            href={t.key === "overview" ? `/admin/projects/${project.id}` : `/admin/projects/${project.id}?tab=${t.key}`}
-            className={t.key === tab ? "on" : undefined}
-            aria-current={t.key === tab ? "page" : undefined}
-          >
-            {t.label}
-            {tabCounts[t.key] > 0 && <span className="count">{tabCounts[t.key]}</span>}
-          </Link>
-        ))}
-      </nav>
 
       <div className="ws">
         <aside className="ws-side" aria-label="Summary">
@@ -256,6 +243,20 @@ export default async function ProjectDetailPage({
         </aside>
 
         <div className="ws-main">
+          <nav className="ws-tabs" aria-label="Sections">
+            {TABS.map((t) => (
+              <Link
+                key={t.key}
+                href={t.key === "overview" ? `/admin/projects/${project.id}` : `/admin/projects/${project.id}?tab=${t.key}`}
+                className={t.key === tab ? "on" : undefined}
+                aria-current={t.key === tab ? "page" : undefined}
+              >
+                {t.label}
+                {tabCounts[t.key] > 0 && <span className="count">{tabCounts[t.key]}</span>}
+              </Link>
+            ))}
+          </nav>
+
           {tab === "overview" && (
           <section id="attention" className="ws-sec">
             <h3>Needs attention</h3>
