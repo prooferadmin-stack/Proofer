@@ -41,7 +41,13 @@ export default async function ReconcilePage() {
         amountCents: sess.amount_total ?? 0,
         currency: sess.currency ?? "usd",
         created: new Date(sess.created * 1000).toISOString(),
-        kind: sess.metadata?.invoice_id ? "invoice" : sess.metadata?.kind === "store_order" ? "store" : "other",
+        kind: sess.metadata?.invoice_id
+          ? "invoice"
+          : sess.metadata?.kind === "store_order"
+            ? "store"
+            : sess.metadata?.kind === "gift_card"
+              ? "gift_card"
+              : "other",
         invoiceId: sess.metadata?.invoice_id ?? null,
       });
       if (stripeRows.length >= 500) break;
@@ -53,7 +59,7 @@ export default async function ReconcilePage() {
 
   const { data, error } = await supabaseAdmin()
     .from("payment_events")
-    .select("checkout_session_id, invoice_id, amount_cents, outcome, received_at")
+    .select("*")
     .gte("received_at", new Date(since * 1000).toISOString());
   if (error && !isMissingTable(error)) throw error;
   const events: AppliedEvent[] = (data ?? []).map((r) => ({
@@ -62,9 +68,11 @@ export default async function ReconcilePage() {
     amountCents: r.amount_cents as number | null,
     outcome: r.outcome as string,
     receivedAt: r.received_at as string,
+    // Column from migration 0032; absent before it runs.
+    giftCard: !!(r as { gift_card_purchase_id?: string | null }).gift_card_purchase_id,
   }));
 
-  const { rows, stripeTotal, appliedTotal } = reconcile(stripeRows, events);
+  const { rows, stripeTotal, appliedTotal, giftCardStripeTotal, giftCardAppliedTotal } = reconcile(stripeRows, events);
   const problems = rows.filter((r) => r.status !== "ok" && r.status !== "store_order").length;
 
   return (
@@ -86,6 +94,18 @@ export default async function ReconcilePage() {
           <dd>{formatCents(appliedTotal)}</dd>
           <dt>applied in Proofer</dt>
         </div>
+        {(giftCardStripeTotal > 0 || giftCardAppliedTotal > 0) && (
+          <>
+            <div>
+              <dd>{formatCents(giftCardStripeTotal)}</dd>
+              <dt>gift card sales in Stripe</dt>
+            </div>
+            <div>
+              <dd>{formatCents(giftCardAppliedTotal)}</dd>
+              <dt>gift cards issued in Proofer</dt>
+            </div>
+          </>
+        )}
         <div className={problems > 0 ? "late" : undefined}>
           <dd>{problems}</dd>
           <dt>{problems === 1 ? "thing to check" : "things to check"}</dt>

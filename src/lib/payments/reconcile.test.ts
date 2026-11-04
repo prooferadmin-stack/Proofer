@@ -44,3 +44,21 @@ test("installment payments count, amount differences and Proofer-only rows are f
   // Problems sort first.
   assert.notEqual(r.rows[0].status, "ok");
 });
+
+test("gift card sales match their issue events and stay out of the invoice totals", () => {
+  const card = { ...e("cs_gc", 39200, "gift_card_issued"), invoiceId: null, giftCard: true };
+  const refused = { ...e("cs_gc2", 49000, "amount_mismatch"), invoiceId: null, giftCard: true };
+  const r = reconcile([s("cs_gc", 39200, "gift_card"), s("cs_gc2", 49000, "gift_card"), s("cs_1", 53500)], [card, refused, e("cs_1", 53500)]);
+  const by = Object.fromEntries(r.rows.map((x) => [x.sessionId, x.status]));
+  assert.deepEqual(by, { cs_gc: "ok", cs_gc2: "needs_attention", cs_1: "ok" });
+  assert.equal(r.stripeTotal, 53500);
+  assert.equal(r.appliedTotal, 53500);
+  assert.equal(r.giftCardStripeTotal, 39200 + 49000);
+  assert.equal(r.giftCardAppliedTotal, 39200);
+});
+
+test("a gift card sale Stripe took but Proofer never issued is flagged", () => {
+  const r = reconcile([s("cs_gc", 25000, "gift_card")], []);
+  assert.deepEqual(r.rows.map((x) => x.status), ["stripe_only"]);
+  assert.equal(r.giftCardAppliedTotal, 0);
+});

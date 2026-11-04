@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ThemePicker } from "./theme-picker";
 import { BrandImageUpload } from "./brand-upload";
 import { removeBrandImage, updateBrand } from "./brand-actions";
@@ -83,6 +84,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           Save brand
         </button>
       </form>
+
+      <h2 id="gift-cards">Gift cards</h2>
+      <p className="muted">
+        On/off switch, amounts, the session card discount, terms and card designs: <Link href="/admin/gift-cards/settings">Gift card settings</Link>.
+      </p>
 
       <h2 id="calendar">Google Calendar</h2>
       <p className="muted">

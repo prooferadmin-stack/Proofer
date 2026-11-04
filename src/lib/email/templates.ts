@@ -21,7 +21,9 @@ export type TemplateKey =
   | "invoice_reminder"
   | "invoice_overdue"
   | "contract_reminder"
-  | "questionnaire_reminder";
+  | "questionnaire_reminder"
+  | "gift_card_purchased"
+  | "gift_card_sold_notice";
 
 export type TemplateDef = {
   key: TemplateKey;
@@ -196,6 +198,54 @@ David`,
       ...SAMPLE_CONTACT,
       "project.title": "Ellis Family Session",
       "questionnaire.link": "https://example.com/questionnaire/1234",
+    },
+  },
+  gift_card_purchased: {
+    key: "gift_card_purchased",
+    name: "Gift card bought",
+    description: "Goes to the buyer once their gift card payment clears.",
+    fields: ["buyer.first_name", "card.summary", "card.code", "card.expires", "card.terms", "card.link"],
+    subject: "Your gift card is ready",
+    body: `Hi {{buyer.first_name}},
+
+Thank you. Here's your gift card: {{card.summary}}.
+
+Code: {{card.code}}
+Good until {{card.expires}}
+
+A printable card is ready to pass along:
+
+{{card.link}}
+
+The code works on any invoice, all at once or a bit at a time.
+
+{{card.terms}}
+
+David`,
+    sample: {
+      "buyer.first_name": "Sam",
+      "card.summary": "$490 · Headshot Session at today's price",
+      "card.code": "DMP-7K3Q-X9PA-M2RT",
+      "card.expires": "November 4, 2031",
+      "card.terms": "Good toward any David Monroe Photography invoice. Expires on the date shown, 5 years from purchase.",
+      "card.link": "https://example.com/gift-cards/card/abc123",
+    },
+  },
+  gift_card_sold_notice: {
+    key: "gift_card_sold_notice",
+    name: "Gift card sold (note to you)",
+    description: "Goes to you when a gift card is bought.",
+    fields: ["buyer.name", "buyer.email", "card.summary", "card.paid", "card.admin_link"],
+    subject: "Gift card sold: {{card.summary}}",
+    body: `{{buyer.name}} ({{buyer.email}}) bought a gift card: {{card.summary}}. They paid {{card.paid}}.
+
+{{card.admin_link}}`,
+    sample: {
+      "buyer.name": "Sam Lee",
+      "buyer.email": "sam@example.com",
+      "card.summary": "$490 · Headshot Session at today's price",
+      "card.paid": "$392",
+      "card.admin_link": "https://example.com/admin/gift-cards/1234",
     },
   },
   booking_confirmation: {

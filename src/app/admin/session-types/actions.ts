@@ -73,6 +73,7 @@ function sessionTypeFields(formData: FormData) {
     deposit_cents: depositCents,
     is_public: formData.get("is_public") === "on",
     active: formData.get("active") === "on",
+    gift_card_offered: formData.get("gift_card_offered") === "on",
     contract_template_id: str(formData.get("contract_template_id")),
     questionnaire_template_id: str(formData.get("questionnaire_template_id")),
     min_notice_minutes: parseMinutes(formData.get("min_notice_minutes"), "Minimum notice"),

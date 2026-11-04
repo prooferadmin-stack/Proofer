@@ -10,7 +10,7 @@ import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
 import { supabaseAdmin } from "@/lib/supabase";
 import { paymentFromEvent } from "@/lib/payments/webhook";
-import { onPaymentReceived } from "@/lib/email/triggers";
+import { onGiftCardIssued, onPaymentReceived } from "@/lib/email/triggers";
 import { onBookingPaid } from "@/lib/booking/confirm";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +37,35 @@ export async function POST(req: Request) {
 
   const db = supabaseAdmin();
   const p = paymentFromEvent(event);
+
+  // Gift card purchase (2.7): issue_gift_card() (migration 0032) writes the
+  // audit row and, for a paid session at exactly the purchase price, creates
+  // the card in the same transaction. Invoices are never touched here.
+  if (p.giftCardPurchaseId) {
+    const { data: outcome, error } = await db.rpc("issue_gift_card", {
+      p_event_id: event.id,
+      p_type: event.type,
+      p_livemode: event.livemode,
+      p_purchase_id: p.giftCardPurchaseId,
+      p_session_id: p.sessionId,
+      p_payment_intent_id: p.paymentIntentId,
+      p_amount_cents: p.amountCents,
+      p_currency: p.currency,
+      p_mark_paid: p.markPaid,
+      p_payload: event,
+    });
+    if (error) {
+      console.error("stripe webhook: issue_gift_card failed", event.id, error.message);
+      return NextResponse.json({ error: "not recorded" }, { status: 500 });
+    }
+    if (!["gift_card_issued", "recorded", "duplicate"].includes(String(outcome))) {
+      console.error("stripe webhook: gift card payment needs attention", event.id, event.type, outcome, p.giftCardPurchaseId);
+    }
+    // Code email to the buyer and a note to David. Never throws; keyed on
+    // the event id so a retry never mails twice.
+    if (outcome === "gift_card_issued") await onGiftCardIssued(event.id, p.giftCardPurchaseId);
+    return NextResponse.json({ received: true });
+  }
 
   // A refund names a payment intent, not an invoice; link it to the invoice it paid.
   let invoiceId = p.invoiceId;

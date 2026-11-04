@@ -16,6 +16,8 @@ export type SessionType = {
   buffer_before_minutes: number;
   buffer_after_minutes: number;
   max_bookings_per_day: number | null;
+  // Sold as a gift card worth this session (2.7, migration 0032).
+  gift_card_offered?: boolean;
   created_at: string;
   updated_at: string;
 };

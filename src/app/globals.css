@@ -725,3 +725,35 @@ form.inline { display: inline; }
 .ws-head .ws-edit form { margin: 0; }
 /* Every pill is a full oval. */
 .st, .st.stage, .pill, .chip { border-radius: var(--r-pill); }
+
+/* Gift cards (2.7): buy page and the printable card. */
+.gc-buy fieldset { margin: 0 0 var(--sp-4); }
+.gc-designs { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--sp-3); }
+.gc-design { display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+.gc-design img, .gc-design .gc-design-blank { width: 100%; aspect-ratio: 7 / 5; object-fit: cover; border-radius: 6px; border: 2px solid transparent; background: var(--s0); }
+.gc-design input { position: absolute; opacity: 0; }
+.gc-design input:checked + img, .gc-design input:checked + .gc-design-blank { border-color: var(--acc); }
+.gc-design input:focus-visible + img { outline: 2px solid var(--acc); outline-offset: 2px; }
+.gc-option { display: flex; gap: 8px; align-items: baseline; margin: 6px 0; }
+.gc-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--sp-3); }
+.gc-preset { display: inline-flex; gap: 6px; align-items: center; padding: 6px 12px; border: 1px solid var(--bd-hi); border-radius: var(--r-pill); cursor: pointer; }
+.gc-terms { max-width: 560px; }
+.gc-page { max-width: 640px; margin: 0 auto; }
+.gc-card { border: 1px solid var(--bd-hi); border-radius: 10px; overflow: hidden; background: var(--s1); }
+.gc-card-image { display: block; width: 100%; aspect-ratio: 7 / 5; object-fit: cover; }
+.gc-card-body { padding: var(--sp-4) var(--sp-5, 24px); text-align: center; }
+.gc-card-body h1 { margin: 4px 0; }
+.gc-card-brand { letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px; color: var(--t2); margin: 0; }
+.gc-card-amount { font-size: 20px; font-weight: 600; margin: 6px 0; }
+.gc-card-to { margin: 4px 0; }
+.gc-card-message { font-style: italic; white-space: pre-wrap; margin: 8px 0; }
+.gc-card-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 20px; letter-spacing: 0.06em; margin: 12px 0 4px; }
+.gc-status { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); flex-wrap: wrap; }
+@media print {
+  @page { size: 5in 7in; margin: 0.25in; }
+  body { background: #fff !important; color: #000 !important; }
+  .no-print, nav, .admin-nav { display: none !important; }
+  .gc-page { max-width: none; margin: 0; }
+  .gc-card { border: none; background: #fff; }
+  .gc-card-body, .gc-card-brand { color: #000; }
+}

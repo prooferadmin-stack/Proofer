@@ -32,6 +32,7 @@ test("a paid checkout.session.completed marks the invoice paid", () => {
   assert.deepEqual(p, {
     invoiceId: INVOICE,
     installmentId: null,
+    giftCardPurchaseId: null,
     sessionId: "cs_test_1",
     paymentIntentId: "pi_1",
     amountCents: 53500,
@@ -98,6 +99,7 @@ test("charge.refunded carries the payment intent and refunded amount only", () =
   assert.deepEqual(paymentFromEvent(event), {
     invoiceId: null,
     installmentId: null,
+    giftCardPurchaseId: null,
     sessionId: null,
     paymentIntentId: "pi_1",
     amountCents: 1000,
@@ -133,4 +135,62 @@ test("a malformed installment id is dropped, and never kept without an invoice",
   );
   assert.equal(orphan.invoiceId, null);
   assert.equal(orphan.installmentId, null);
+});
+
+const PURCHASE = "5d0f9a3c-2b7e-4c1a-9f8d-6e5b4a3c2d1e";
+const giftCard = (over: Record<string, unknown> = {}) => ({
+  metadata: { kind: "gift_card", gift_card_purchase_id: PURCHASE },
+  client_reference_id: PURCHASE,
+  amount_total: 39200,
+  ...over,
+});
+
+test("a paid gift card session names its purchase and no invoice", () => {
+  const p = paymentFromEvent(sessionEvent("checkout.session.completed", giftCard()));
+  assert.equal(p.giftCardPurchaseId, PURCHASE);
+  assert.equal(p.invoiceId, null);
+  assert.equal(p.installmentId, null);
+  assert.equal(p.amountCents, 39200);
+  assert.equal(p.markPaid, true);
+});
+
+test("gift card sessions wait for the money like invoices do", () => {
+  assert.equal(paymentFromEvent(sessionEvent("checkout.session.completed", giftCard({ payment_status: "unpaid" }))).markPaid, false);
+  assert.equal(paymentFromEvent(sessionEvent("checkout.session.async_payment_succeeded", giftCard())).markPaid, true);
+  for (const type of ["checkout.session.expired", "checkout.session.async_payment_failed"]) {
+    const p = paymentFromEvent(sessionEvent(type, giftCard({ payment_status: "unpaid" })));
+    assert.equal(p.markPaid, false);
+    assert.equal(p.giftCardPurchaseId, PURCHASE);
+  }
+});
+
+test("gift card ids that disagree, are missing or malformed trust neither", () => {
+  const cases = [
+    giftCard({ client_reference_id: "3f2b8c1e-9a4d-4e7f-8b2a-1c0d9e8f7a6b" }),
+    giftCard({ client_reference_id: null }),
+    giftCard({ metadata: { kind: "gift_card", gift_card_purchase_id: "nope" }, client_reference_id: "nope" }),
+    giftCard({ metadata: { kind: "gift_card" } }),
+    giftCard({ metadata: { gift_card_purchase_id: PURCHASE } }),
+  ];
+  for (const c of cases) {
+    const p = paymentFromEvent(sessionEvent("checkout.session.completed", c));
+    assert.equal(p.giftCardPurchaseId, null);
+    assert.equal(p.invoiceId, null);
+    assert.equal(p.markPaid, false);
+  }
+});
+
+test("a session claiming to be both a gift card and an invoice pays neither", () => {
+  const p = paymentFromEvent(
+    sessionEvent("checkout.session.completed", giftCard({ metadata: { kind: "gift_card", gift_card_purchase_id: PURCHASE, invoice_id: INVOICE } }))
+  );
+  assert.equal(p.giftCardPurchaseId, null);
+  assert.equal(p.invoiceId, null);
+  assert.equal(p.markPaid, false);
+});
+
+test("invoice sessions never carry a gift card purchase", () => {
+  const p = paymentFromEvent(sessionEvent("checkout.session.completed", { metadata: { invoice_id: INVOICE, gift_card_purchase_id: PURCHASE } }));
+  assert.equal(p.invoiceId, INVOICE);
+  assert.equal(p.giftCardPurchaseId, null);
 });

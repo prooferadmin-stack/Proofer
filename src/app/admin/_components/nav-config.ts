@@ -75,7 +75,13 @@ export const MORE_GROUPS: MoreGroup[] = [
       { href: "/admin/emails", name: "Emails", on: under("/admin/emails", [INBOX]) },
     ],
   },
-  { label: "Shop", links: [{ href: "/admin/store", name: "Store", on: under("/admin/store") }] },
+  {
+    label: "Shop",
+    links: [
+      { href: "/admin/gift-cards", name: "Gift cards", on: under("/admin/gift-cards") },
+      { href: "/admin/store", name: "Store", on: under("/admin/store") },
+    ],
+  },
   { label: "Settings", links: [{ href: "/admin/settings", name: "Settings", on: under("/admin/settings") }] },
 ];
 

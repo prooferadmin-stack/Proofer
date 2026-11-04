@@ -10,7 +10,9 @@ import { businessTodayISO } from "@/lib/dates";
 import { formatSessionWhen } from "@/lib/booking/book";
 import { sendTemplatedEmail } from "./send";
 import { isStageTemplate, isTemplateKey } from "./templates";
-import { absoluteUrl, formatCents, formatDate, idempotencyKeys, projectFields } from "./events";
+import { absoluteUrl, firstName, formatCents, formatDate, idempotencyKeys, projectFields } from "./events";
+import { formatCode } from "@/lib/gift-cards/codes";
+import { cardAmount, cardDate, cardSummary } from "@/lib/gift-cards/display";
 
 // Links in emails need an absolute URL. APP_BASE_URL wins when set; otherwise
 // use the host the admin is on (these triggers run in admin actions, or in the
@@ -320,6 +322,56 @@ export async function onContractSigned(contractId: string) {
       contactId: client?.id ?? null,
       projectId: contract.project_id,
       idempotencyKey: idempotencyKeys.contractSignedNotice(contract.id),
+    });
+  });
+}
+
+// A gift card was just issued by the webhook (2.7): the code and printable
+// card link to the buyer, and a note to David. The code goes only to the
+// buyer's email; the card link carries a separate token, never the code.
+export async function onGiftCardIssued(stripeEventId: string, purchaseId: string) {
+  const db = supabaseAdmin();
+  const { data: card, error } = await db
+    .from("gift_cards")
+    .select("id, code, initial_cents, session_label, buyer_name, buyer_email, expires_at, view_token, gift_card_purchases(amount_cents)")
+    .eq("purchase_id", purchaseId)
+    .maybeSingle();
+  if (error || !card) {
+    console.error(`email trigger failed: gift card ${stripeEventId}`, error ?? "card not found");
+    return;
+  }
+  const { data: settings } = await db.from("gift_card_settings").select("terms").eq("id", 1).maybeSingle();
+  const purchase = card.gift_card_purchases as unknown as { amount_cents: number } | null;
+  const base = await appBaseUrl();
+  const summary = cardSummary(Number(card.initial_cents), (card.session_label as string | null) ?? null);
+
+  await safely(`gift card ${card.id} (buyer)`, async () => {
+    await sendTemplatedEmail({
+      key: "gift_card_purchased",
+      to: String(card.buyer_email ?? ""),
+      fields: {
+        "buyer.first_name": firstName(card.buyer_name as string | null),
+        "card.summary": summary,
+        "card.code": formatCode(String(card.code)),
+        "card.expires": cardDate(String(card.expires_at)),
+        "card.terms": (settings?.terms as string | undefined) ?? "",
+        "card.link": absoluteUrl(base, `/gift-cards/card/${card.view_token}`),
+      },
+      idempotencyKey: idempotencyKeys.giftCardPurchased(card.id as string),
+    });
+  });
+  await safely(`gift card ${card.id} (David)`, async () => {
+    await sendTemplatedEmail({
+      key: "gift_card_sold_notice",
+      to: ADMIN_EMAILS[0],
+      fields: {
+        "buyer.name": String(card.buyer_name ?? ""),
+        "buyer.email": String(card.buyer_email ?? ""),
+        "card.summary": summary,
+        "card.paid": purchase ? cardAmount(Number(purchase.amount_cents)) : "",
+        "card.admin_link": absoluteUrl(base, `/admin/gift-cards/${card.id}`),
+      },
+      idempotencyKey: idempotencyKeys.giftCardSoldNotice(card.id as string),
     });
   });
 }

@@ -67,6 +67,12 @@ export function SessionTypeFields({
         />
       </div>
       <div>
+        <label>
+          <input name="gift_card_offered" type="checkbox" defaultChecked={sessionType?.gift_card_offered ?? false} /> Sell as a gift card
+        </label>
+        <p className="hint">Clients can buy a card worth this session at the session card discount (Gift cards &gt; Settings).</p>
+      </div>
+      <div>
         <label htmlFor="min_notice_minutes">Minimum notice (minutes before start)</label>
         <input
           id="min_notice_minutes"
