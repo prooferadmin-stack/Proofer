@@ -51,7 +51,9 @@ jobs:
       # must pass before anything deploys.
       - run: npm test
       - run: npm run build
-      - run: npx opennextjs-cloudflare build
+      # OpenNext refuses Next.js 15 now its 2-year support window has closed
+      # (David approved the flag 2026-11-04; upgrade to Next 16 after launch).
+      - run: npx opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion
       - run: npx wrangler deploy --env staging
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -77,7 +79,8 @@ jobs:
       # must pass before anything deploys.
       - run: npm test
       - run: npm run build
-      - run: npx opennextjs-cloudflare build
+      # Same flag as staging (see above).
+      - run: npx opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion
       - run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
