@@ -7,6 +7,8 @@
 // automation_jobs and email_log change here.
 import { supabaseAdmin } from "@/lib/supabase";
 import { isMissingTable } from "@/lib/db-errors";
+import { creditFor } from "@/lib/gift-cards/due";
+import { loadCredits } from "@/lib/gift-cards/redeem";
 import { sendTemplatedEmail } from "@/lib/email/send";
 import { isSendableEmail } from "@/lib/email/render";
 import { absoluteUrl, formatCents, formatDate, idempotencyKeys, projectFields } from "@/lib/email/events";
@@ -202,6 +204,10 @@ async function buildEmail(job: ExistingJob, baseUrl: string): Promise<Outgoing |
       amountCents = Number(inv.total_cents);
       dueDate = inv.due_date as string | null;
     }
+    // Gift card credit (2.8) comes off the amount in the reminder.
+    const credits = await loadCredits(db, invoiceId);
+    amountCents -= creditFor(credits, invoiceId, job.kind === "installment" ? job.target_id : null);
+    if (amountCents <= 0) return null;
     const contact = inv.contacts as unknown as ContactJoin;
     const to = emailOf(contact);
     if (!to) return null;

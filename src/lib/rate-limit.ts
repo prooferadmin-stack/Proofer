@@ -37,3 +37,20 @@ export async function isActionRateLimited(scope: string): Promise<boolean> {
   const ip = h.get("cf-connecting-ip") || h.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   return isRateLimited(`${scope}:${ip}`);
 }
+
+// A separate limiter with its own window and cap, for gift card codes on
+// /pay (2.8): 5 tries per 15 minutes, counted per IP and per invoice.
+const custom = new Map<string, { count: number; windowStart: number }>();
+
+export function isRateLimitedFor(key: string, max: number, windowMs: number, now = Date.now()): boolean {
+  const entry = custom.get(key);
+  if (!entry || now - entry.windowStart > windowMs) {
+    custom.set(key, { count: 1, windowStart: now });
+    if (custom.size > MAX_TRACKED_KEYS) {
+      for (const [k, v] of custom) if (now - v.windowStart > windowMs) custom.delete(k);
+    }
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > max;
+}

@@ -23,6 +23,7 @@ export type TemplateKey =
   | "contract_reminder"
   | "questionnaire_reminder"
   | "gift_card_purchased"
+  | "invoice_paid_by_gift_card"
   | "gift_card_sold_notice";
 
 export type TemplateDef = {
@@ -93,11 +94,13 @@ David`,
     key: "payment_receipt",
     name: "Payment receipt",
     description: "A payment came through.",
-    fields: [...CONTACT, "payment.amount", "payment.date", "invoice.link"],
+    fields: [...CONTACT, "payment.amount", "payment.date", "payment.gift_card_note", "invoice.link"],
     subject: "Received, thank you",
     body: `Hi {{contact.first_name}},
 
 Your payment of {{payment.amount}} came through on {{payment.date}}. Thank you.
+
+{{payment.gift_card_note}}
 
 Your receipt and invoice are here any time:
 
@@ -108,6 +111,32 @@ David`,
       ...SAMPLE_CONTACT,
       "payment.amount": "$450.00",
       "payment.date": "October 6, 2026",
+      "payment.gift_card_note": "A gift card covered $350.00 of this invoice.",
+      "invoice.link": "https://example.com/pay/1234",
+    },
+  },
+  invoice_paid_by_gift_card: {
+    key: "invoice_paid_by_gift_card",
+    name: "Paid with a gift card",
+    description: "A gift card fully paid an invoice or one of its payments (no card charge, so no Stripe receipt).",
+    fields: [...CONTACT, "payment.amount", "payment.date", "card.balance", "invoice.link"],
+    subject: "Paid with your gift card",
+    body: `Hi {{contact.first_name}},
+
+Your gift card paid {{payment.amount}} on {{payment.date}}. Nothing more is due on it right now.
+
+Left on the card: {{card.balance}}
+
+Your invoice is here any time:
+
+{{invoice.link}}
+
+David`,
+    sample: {
+      ...SAMPLE_CONTACT,
+      "payment.amount": "$350.00",
+      "payment.date": "November 4, 2026",
+      "card.balance": "$150.00",
       "invoice.link": "https://example.com/pay/1234",
     },
   },

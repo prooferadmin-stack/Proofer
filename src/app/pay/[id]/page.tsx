@@ -8,7 +8,8 @@ import { formatCents } from "@/app/admin/invoices/money";
 import type { Invoice, InvoiceInstallment, InvoiceLineItem } from "@/app/admin/invoices/types";
 import { formatDay } from "@/lib/dates";
 import { formatSessionWhen } from "@/lib/booking/book";
-import { createCheckoutSession } from "./actions";
+import { applyGiftCard, createCheckoutSession } from "./actions";
+import { creditFor, invoiceCredit, nextPayment, type CreditRow } from "@/lib/gift-cards/due";
 import { isMissingTable } from "@/lib/db-errors";
 import { BrandFooter, BrandHeader } from "@/app/_brand/brand-frame";
 
@@ -20,6 +21,7 @@ const PAY_ERRORS: Record<string, string> = {
   hold_expired: "Sorry, the time you picked is no longer held for you. Please book again and pick a time.",
   booking_canceled: "This booking was canceled.",
   limited: "Too many attempts. Please wait a few minutes and try again.",
+  gift_card: "That code didn't work. Check it and try again.",
 };
 
 export default async function PayInvoicePage({
@@ -27,10 +29,10 @@ export default async function PayInvoicePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; applied?: string }>;
 }) {
   const { id } = await params;
-  const { error: errorKey } = await searchParams;
+  const { error: errorKey, applied } = await searchParams;
 
   const db = supabaseAdmin();
   const [{ data, error }, { data: items, error: itemsError }, { data: scheduleRows, error: scheduleError }] =
@@ -56,7 +58,24 @@ export default async function PayInvoicePage({
   const holdLapsed =
     booking?.status === "pending_payment" && new Date(booking.hold_expires_at as string).getTime() <= Date.now();
   const bookingBlocksPay = booking?.status === "canceled" || holdLapsed;
-  const next = installments.find((i) => i.status === "unpaid") ?? null;
+  // Gift card credit (2.8): redemptions and undos on this invoice.
+  const { data: creditRows, error: creditError } = await db
+    .from("gift_card_ledger")
+    .select("id, kind, amount_cents, invoice_id, installment_id, created_at, gift_cards(code)")
+    .eq("invoice_id", id)
+    .order("created_at", { ascending: true });
+  if (creditError && !isMissingTable(creditError)) throw creditError;
+  const credits = (creditRows ?? []) as unknown as (CreditRow & { id: string; gift_cards: { code: string } | null })[];
+  const liveCards = new Map<string, number>();
+  for (const c of credits) {
+    const tail = c.gift_cards?.code.slice(-4) ?? "????";
+    // Redemptions are negative and undos positive, so this nets to live credit.
+    if (c.kind === "redeem" || c.kind === "reverse") liveCards.set(tail, (liveCards.get(tail) ?? 0) - c.amount_cents);
+  }
+  const totalCredit = invoiceCredit(credits, id);
+  const pay = nextPayment({ id, total_cents: Number(data?.total_cents ?? 0) }, installments, credits);
+  const next = pay?.installmentId ? (installments.find((i) => i.id === pay.installmentId) ?? null) : null;
+  const appliedCents = applied && /^\d{1,9}$/.test(applied) ? Number(applied) : null;
 
   const invoice = data as unknown as InvoiceWithProject;
   const lineItems = (items ?? []) as InvoiceLineItem[];
@@ -123,6 +142,24 @@ export default async function PayInvoicePage({
               <strong>{formatCents(invoice.total_cents, invoice.currency)}</strong>
             </td>
           </tr>
+          {[...liveCards.entries()]
+            .filter(([, cents]) => cents > 0)
+            .map(([tail, cents]) => (
+              <tr key={tail}>
+                <td>Gift card ending {tail}</td>
+                <td>-{formatCents(cents, invoice.currency)}</td>
+              </tr>
+            ))}
+          {totalCredit > 0 && invoice.status === "sent" && (
+            <tr>
+              <td>
+                <strong>Left to pay</strong>
+              </td>
+              <td>
+                <strong>{formatCents(Math.max(0, invoice.total_cents - totalCredit), invoice.currency)}</strong>
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
 
@@ -143,7 +180,12 @@ export default async function PayInvoicePage({
                 <tr key={i.id}>
                   <td>{i.label}</td>
                   <td>{i.due_date ? formatDay(i.due_date) : "On receipt"}</td>
-                  <td>{formatCents(i.amount_cents, invoice.currency)}</td>
+                  <td>
+                    {formatCents(i.amount_cents, invoice.currency)}
+                    {i.status !== "paid" && creditFor(credits, id, i.id) > 0 && (
+                      <span className="muted small"> ({formatCents(creditFor(credits, id, i.id), invoice.currency)} by gift card)</span>
+                    )}
+                  </td>
                   <td>{i.status === "paid" ? "Paid" : i.id === next?.id ? "Due next" : ""}</td>
                 </tr>
               ))}
@@ -155,11 +197,24 @@ export default async function PayInvoicePage({
       {invoice.status === "paid" && <p>This invoice has already been paid. Thank you.</p>}
       {invoice.status === "void" && <p>This invoice has been voided.</p>}
       {invoice.status === "draft" && <p>This invoice isn&apos;t ready to be paid yet.</p>}
-      {invoice.status === "sent" && !bookingBlocksPay && (
+      {appliedCents !== null && (
+        <p className="notice" role="status">
+          Your gift card took {formatCents(appliedCents, invoice.currency)} off.
+          {invoice.status === "paid" ? " Nothing more is due." : ""}
+        </p>
+      )}
+      {invoice.status === "sent" && !bookingBlocksPay && pay && (
         <form action={payNow}>
           <button type="submit">
-            {next ? `Pay ${next.label.toLowerCase()}: ${formatCents(next.amount_cents, invoice.currency)}` : "Pay now"}
+            {next ? `Pay ${next.label.toLowerCase()}: ${formatCents(pay.dueCents, invoice.currency)}` : `Pay ${formatCents(pay.dueCents, invoice.currency)}`}
           </button>
+        </form>
+      )}
+      {invoice.status === "sent" && !bookingBlocksPay && booking?.status !== "pending_payment" && (
+        <form action={applyGiftCard.bind(null, invoice.id)} id="gift-card" className="row" style={{ marginTop: 16 }}>
+          <label htmlFor="gc-code">Have a gift card?</label>
+          <input id="gc-code" name="code" type="text" required maxLength={40} autoComplete="off" autoCapitalize="characters" placeholder="DMP-XXXX-XXXX-XXXX" />
+          <button type="submit">Apply</button>
         </form>
       )}
       <BrandFooter />

@@ -1,11 +1,13 @@
 "use server";
 
 // Gift card setup (Phase 2.7): the on/off switch, amounts, session discount,
-// terms and card designs. Nothing here creates, changes or spends a card;
+// terms and card designs, plus refunding an unused card (2.8). Nothing here
+// creates or spends a card;
 // cards come only from a paid Stripe purchase (issue_gift_card, 0032).
 // Design images use the same presigned-PUT flow as product images, under
 // gift-cards/designs/<design id>/<uuid>.<ext> (key shape enforced by 0032).
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { deletePrefix, headObjectSize, presignPut, r2Configured } from "@/lib/r2";
@@ -193,4 +195,58 @@ export async function saveGiftCardDesignImage(designId: string, key: string): Pr
   await deletePrefix(prefix, (k) => k !== key);
   revalidatePath(PATH);
   return { ok: true };
+}
+
+// Refund an unused card (2.8): void it first (void_gift_card, 0033: unused,
+// active, under 30 days old), then refund the buyer in Stripe. If Stripe
+// fails, the card stays void and this same action retries the refund; the
+// idempotency key (the card id) means Stripe never refunds twice.
+export async function refundGiftCard(cardId: string) {
+  await requireAdmin();
+  if (!UUID.test(cardId)) return;
+  const db = supabaseAdmin();
+  const { data: card, error } = await db
+    .from("gift_cards")
+    .select("id, status, purchase_id, gift_card_purchases(stripe_payment_intent_id, refund_id)")
+    .eq("id", cardId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!card) return;
+  const purchase = card.gift_card_purchases as unknown as { stripe_payment_intent_id: string | null; refund_id: string | null } | null;
+  const back = (q: string) => redirect(`/admin/gift-cards/${cardId}?${q}`);
+
+  if (card.status === "active") {
+    const { data: outcome, error: voidError } = await db.rpc("void_gift_card", {
+      p_card_id: cardId,
+      p_reason: "Refunded to the buyer (unused, within 30 days)",
+    });
+    if (voidError) throw voidError;
+    if (outcome !== "voided") back(`refund=${encodeURIComponent(String(outcome))}`);
+  }
+  if (purchase?.refund_id) back("refund=done");
+  if (!purchase?.stripe_payment_intent_id) {
+    await db.from("gift_card_purchases").update({ refund_error: "No Stripe payment on record" }).eq("id", card.purchase_id);
+    back("refund=failed");
+  }
+
+  try {
+    const { stripe } = await import("@/lib/stripe");
+    const refund = await stripe().refunds.create(
+      { payment_intent: purchase!.stripe_payment_intent_id!, metadata: { kind: "gift_card_refund", gift_card_id: cardId } },
+      { idempotencyKey: `gift-card-refund:${cardId}` }
+    );
+    const { error: saveError } = await db
+      .from("gift_card_purchases")
+      .update({ refund_id: refund.id, refunded_at: new Date().toISOString(), refund_error: null })
+      .eq("id", card.purchase_id);
+    if (saveError) throw saveError;
+  } catch (err) {
+    const message = err instanceof Error ? err.message.slice(0, 300) : "Stripe refund failed";
+    await db.from("gift_card_purchases").update({ refund_error: message }).eq("id", card.purchase_id);
+    revalidatePath(`/admin/gift-cards/${cardId}`);
+    back("refund=failed");
+  }
+  revalidatePath(`/admin/gift-cards/${cardId}`);
+  revalidatePath("/admin/gift-cards");
+  back("refund=done");
 }

@@ -13,6 +13,8 @@ import { isStageTemplate, isTemplateKey } from "./templates";
 import { absoluteUrl, firstName, formatCents, formatDate, idempotencyKeys, projectFields } from "./events";
 import { formatCode } from "@/lib/gift-cards/codes";
 import { cardAmount, cardDate, cardSummary } from "@/lib/gift-cards/display";
+import { invoiceCredit } from "@/lib/gift-cards/due";
+import { loadCredits } from "@/lib/gift-cards/redeem";
 
 // Links in emails need an absolute URL. APP_BASE_URL wins when set; otherwise
 // use the host the admin is on (these triggers run in admin actions, or in the
@@ -137,6 +139,8 @@ export async function onPaymentReceived(stripeEventId: string, invoiceId: string
     if (!contact) return;
 
     const base = await appBaseUrl();
+    // Gift card credit on this invoice (2.8), mentioned on the receipt.
+    const credit = invoiceCredit(await loadCredits(supabaseAdmin(), invoiceId), invoiceId);
     await sendTemplatedEmail({
       key: "payment_receipt",
       to: contact.email ?? "",
@@ -144,11 +148,47 @@ export async function onPaymentReceived(stripeEventId: string, invoiceId: string
         ...projectFields(contact.name, null),
         "payment.amount": formatCents(amountCents),
         "payment.date": formatDate(businessTodayISO()),
+        "payment.gift_card_note": credit > 0 ? `A gift card covered ${formatCents(credit)} of this invoice.` : "",
         "invoice.link": absoluteUrl(base, `/pay/${invoice.id}`),
       },
       contactId: contact.id,
       projectId: (invoice.project_id as string | null) ?? null,
       idempotencyKey: idempotencyKeys.paymentReceipt(stripeEventId),
+    });
+  });
+}
+
+// A gift card fully paid an invoice, or at least one of its installments
+// (2.8). No Stripe charge happened, so this is the client's receipt.
+export async function onGiftCardCovered(
+  invoiceId: string,
+  r: { giftCardId: string; appliedCents: number; balanceCents: number }
+) {
+  await safely(`gift card covered ${invoiceId}`, async () => {
+    const { data: invoice, error } = await supabaseAdmin()
+      .from("invoices")
+      .select("id, contact_id, project_id")
+      .eq("id", invoiceId)
+      .single();
+    if (error || !invoice) throw error ?? new Error("Invoice not found");
+    const contact = await loadContact(invoice.contact_id as string | null);
+    if (!contact) return;
+    const base = await appBaseUrl();
+    await sendTemplatedEmail({
+      key: "invoice_paid_by_gift_card",
+      to: contact.email ?? "",
+      fields: {
+        ...projectFields(contact.name, null),
+        "payment.amount": formatCents(r.appliedCents),
+        "payment.date": formatDate(businessTodayISO()),
+        "card.balance": formatCents(r.balanceCents),
+        "invoice.link": absoluteUrl(base, `/pay/${invoice.id}`),
+      },
+      contactId: contact.id,
+      projectId: (invoice.project_id as string | null) ?? null,
+      // The card's balance only goes down, so card + invoice + balance names
+      // exactly one redemption.
+      idempotencyKey: idempotencyKeys.giftCardCovered(r.giftCardId, invoiceId, r.balanceCents),
     });
   });
 }

@@ -1,19 +1,35 @@
 // One gift card (Phase 2.7): what was bought, for how much, and its ledger.
-// Read-only in 2.7; refunds and applying to invoices come with 2.8.
+// 2.8: refund + void while unused and under 30 days old.
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
 import { formatDateTime } from "@/lib/dates";
 import { formatCode } from "@/lib/gift-cards/codes";
 import { cardAmount, cardDate, cardSummary } from "@/lib/gift-cards/display";
+import { ConfirmButton } from "../../_components/confirm-button";
+import { refundGiftCard } from "../actions";
 
 export const dynamic = "force-dynamic";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const KIND: Record<string, string> = { issue: "Issued", redeem: "Used on invoice", reverse: "Undone", void: "Voided" };
+const REFUND: Record<string, [string, boolean]> = {
+  done: ["Refunded in Stripe and the card is void.", true],
+  failed: ["The card is void but Stripe's refund failed. Retry below.", false],
+  used: ["This card has been used, so it can't be refunded.", false],
+  too_late: ["This card is more than 30 days old, so it can't be refunded.", false],
+  already_void: ["This card was already void.", false],
+};
 
-export default async function GiftCardPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function GiftCardPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ refund?: string }>;
+}) {
   const { id } = await params;
+  const { refund } = await searchParams;
   if (!UUID.test(id)) notFound();
   const db = supabaseAdmin();
   const { data: card, error } = await db
@@ -33,6 +49,12 @@ export default async function GiftCardPage({ params }: { params: Promise<{ id: s
   const sum = rows.reduce((n, r) => n + Number(r.amount_cents), 0);
   const purchase = card.gift_card_purchases as Record<string, unknown> | null;
   const design = card.gift_card_designs as { name: string } | null;
+  const refundNote = refund ? REFUND[refund] : undefined;
+  const used = rows.some((r) => r.kind === "redeem");
+  const refundable =
+    card.status === "active" && !used && Number(card.balance_cents) === Number(card.initial_cents) &&
+    new Date(card.issued_at as string).getTime() > Date.now() - 30 * 86400_000;
+  const refundStuck = card.status === "void" && purchase && !purchase.refund_id && !!purchase.refund_error;
 
   return (
     <main>
@@ -64,6 +86,21 @@ export default async function GiftCardPage({ params }: { params: Promise<{ id: s
           </div>
         )}
       </dl>
+      {refundNote && <p className={`notice${refundNote[1] ? "" : " err"}`}>{refundNote[0]}</p>}
+      {refundable && (
+        <form action={refundGiftCard.bind(null, id)} style={{ marginBottom: "var(--sp-4)" }}>
+          <ConfirmButton message={`Void this card and refund the buyer ${purchase ? cardAmount(Number(purchase.amount_cents)) : ""} in Stripe? This can't be undone.`}>
+            Refund and void
+          </ConfirmButton>
+          <span className="muted small"> Unused, bought under 30 days ago.</span>
+        </form>
+      )}
+      {refundStuck && (
+        <form action={refundGiftCard.bind(null, id)} style={{ marginBottom: "var(--sp-4)" }}>
+          <p className="notice err">Stripe refund failed: {String(purchase!.refund_error)}</p>
+          <button type="submit">Retry refund</button>
+        </form>
+      )}
       {sum !== Number(card.balance_cents) && (
         <p className="notice err">The ledger adds up to {cardAmount(sum)}, not the balance. Tell Claude before using this card.</p>
       )}
@@ -92,6 +129,7 @@ export default async function GiftCardPage({ params }: { params: Promise<{ id: s
         {purchase && (
           <li className="small muted">
             Stripe Checkout {String(purchase.stripe_checkout_session_id ?? "")} · payment {String(purchase.stripe_payment_intent_id ?? "")}
+            {purchase.refund_id ? ` · refunded ${formatDateTime(String(purchase.refunded_at))} (${String(purchase.refund_id)})` : ""}
           </li>
         )}
       </ul>

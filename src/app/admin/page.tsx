@@ -6,6 +6,7 @@ import { isMissingTable } from "@/lib/db-errors";
 import { presignGet, r2Configured } from "@/lib/r2";
 import { GRID_SIZE, displayKey, type Variants } from "@/lib/galleries/variants";
 import { summarizeProjectMoney, type SummaryInstallment, type SummaryInvoice } from "@/lib/payments/summary";
+import { loadCreditsFor } from "@/lib/gift-cards/redeem";
 import { attentionItems, dollars, type AttentionItem, type Split } from "@/lib/projects/attention";
 import { KanbanBoard } from "./projects/kanban-board";
 import type { Project, ProjectStage } from "./projects/types";
@@ -72,7 +73,7 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
   if (invoices.length > 0) {
     const { data, error } = await db
       .from("invoice_installments")
-      .select("invoice_id, amount_cents, due_date, status, paid_at")
+      .select("id, invoice_id, amount_cents, due_date, status, paid_at")
       .in("invoice_id", invoices.map((i) => i.id));
     if (error && !isMissingTable(error)) throw error;
     installments = (data ?? []) as InstallmentRow[];
@@ -86,7 +87,8 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
   const paidThisMonth =
     installments.filter((i) => i.status === "paid" && inMonth(i.paid_at)).reduce((s, i) => s + i.amount_cents, 0) +
     invoices.filter((i) => i.status === "paid" && !scheduled.has(i.id) && inMonth(i.paid_at)).reduce((s, i) => s + (i.amount_paid_cents ?? i.total_cents), 0);
-  const money = summarizeProjectMoney(invoices, installments, today);
+  const credits = await loadCreditsFor(db, invoices.map((i) => i.id));
+  const money = summarizeProjectMoney(invoices, installments, today, credits);
 
   const firstStageId = stages[0]?.id ?? null;
   const items = attentionItems({ projects: active, invoices, installments, contracts, questionnaires, firstStageId, today });

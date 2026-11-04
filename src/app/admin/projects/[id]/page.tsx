@@ -7,6 +7,7 @@ import type { Project, ProjectStage } from "../types";
 import { formatCents } from "../../invoices/money";
 import type { Invoice } from "../../invoices/types";
 import { summarizeProjectMoney, type SummaryInstallment } from "@/lib/payments/summary";
+import { loadCreditsFor } from "@/lib/gift-cards/redeem";
 import { businessTodayISO, formatDateTime, formatDay } from "@/lib/dates";
 import { isMissingTable } from "@/lib/db-errors";
 import { attentionItems } from "@/lib/projects/attention";
@@ -139,13 +140,14 @@ export default async function ProjectDetailPage({
   if (invoiceRows.length > 0) {
     const { data: rows, error: instError } = await db
       .from("invoice_installments")
-      .select("invoice_id, amount_cents, due_date, status")
+      .select("id, invoice_id, amount_cents, due_date, status")
       .in("invoice_id", invoiceRows.map((i) => i.id));
     if (instError && !isMissingTable(instError)) throw instError;
     installments = (rows ?? []) as SummaryInstallment[];
   }
   const today = businessTodayISO();
-  const money = summarizeProjectMoney(invoiceRows, installments, today);
+  const credits = await loadCreditsFor(db, invoiceRows.map((i) => i.id));
+  const money = summarizeProjectMoney(invoiceRows, installments, today, credits);
   const attention = attentionItems({
     projects: [project],
     invoices: invoiceRows,

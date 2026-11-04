@@ -10,6 +10,7 @@ import { formatCents } from "../../invoices/money";
 import { clearSuppression } from "../../emails/actions";
 import { ConfirmButton } from "@/app/admin/_components/confirm-button";
 import { summarizeProjectMoney, type SummaryInstallment } from "@/lib/payments/summary";
+import { loadCreditsFor } from "@/lib/gift-cards/redeem";
 import { businessTodayISO, formatDay } from "@/lib/dates";
 import { isMissingTable } from "@/lib/db-errors";
 
@@ -40,12 +41,13 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
   if (invoiceRows.length > 0) {
     const { data: rows, error: instError } = await db
       .from("invoice_installments")
-      .select("invoice_id, amount_cents, due_date, status")
+      .select("id, invoice_id, amount_cents, due_date, status")
       .in("invoice_id", invoiceRows.map((i) => i.id));
     if (instError && !isMissingTable(instError)) throw instError;
     installments = (rows ?? []) as SummaryInstallment[];
   }
-  const money = summarizeProjectMoney(invoiceRows, installments, businessTodayISO());
+  const credits = await loadCreditsFor(db, invoiceRows.map((i) => i.id));
+  const money = summarizeProjectMoney(invoiceRows, installments, businessTodayISO(), credits);
 
   // Phase 8.4: warn when this contact's address can't be mailed.
   const { data: blocked } = contact.email

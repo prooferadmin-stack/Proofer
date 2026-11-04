@@ -65,3 +65,20 @@ test("a fully paid scheduled invoice counts once, as paid", () => {
   );
   assert.deepEqual(s, { paidCents: 20000, upcomingCents: 0, pastDueCents: 0 });
 });
+
+test("gift card credit counts as paid and comes off what's owed", () => {
+  const inv = (id: string, total: number, due: string | null = null) =>
+    ({ id, status: "sent" as const, total_cents: total, amount_paid_cents: null, due_date: due });
+  const credit = (invoice_id: string, cents: number, installment_id: string | null = null) =>
+    ({ kind: "redeem", amount_cents: -cents, invoice_id, installment_id });
+  const s = summarizeProjectMoney(
+    [inv("a", 85000, "2026-01-01"), inv("b", 50000)],
+    [
+      { id: "b1", invoice_id: "b", amount_cents: 20000, due_date: null, status: "paid" },
+      { id: "b2", invoice_id: "b", amount_cents: 30000, due_date: null, status: "unpaid" },
+    ],
+    "2026-11-04",
+    [credit("a", 50000), credit("b", 20000, "b1"), credit("b", 5000, "b2"), { kind: "reverse", amount_cents: 1000, invoice_id: "a", installment_id: null }]
+  );
+  assert.deepEqual(s, { paidCents: 49000 + 20000 + 5000, upcomingCents: 25000, pastDueCents: 36000 });
+});

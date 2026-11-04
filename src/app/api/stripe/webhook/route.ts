@@ -78,6 +78,35 @@ export async function POST(req: Request) {
     invoiceId = data?.id ?? null;
   }
 
+  // A refund of a gift card purchase (2.8, from "Refund and void"): logged
+  // against the purchase. issue_gift_card only records it (p_mark_paid false).
+  if (!invoiceId && !p.sessionId && p.paymentIntentId && event.type === "charge.refunded") {
+    const { data: purchase } = await db
+      .from("gift_card_purchases")
+      .select("id")
+      .eq("stripe_payment_intent_id", p.paymentIntentId)
+      .maybeSingle();
+    if (purchase) {
+      const { error } = await db.rpc("issue_gift_card", {
+        p_event_id: event.id,
+        p_type: event.type,
+        p_livemode: event.livemode,
+        p_purchase_id: purchase.id,
+        p_session_id: null,
+        p_payment_intent_id: p.paymentIntentId,
+        p_amount_cents: p.amountCents,
+        p_currency: p.currency,
+        p_mark_paid: false,
+        p_payload: event,
+      });
+      if (error) {
+        console.error("stripe webhook: gift card refund not recorded", event.id, error.message);
+        return NextResponse.json({ error: "not recorded" }, { status: 500 });
+      }
+      return NextResponse.json({ received: true });
+    }
+  }
+
   const { data: outcome, error } = await db.rpc("record_stripe_event", {
     p_event_id: event.id,
     p_type: event.type,
