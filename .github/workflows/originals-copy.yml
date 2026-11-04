@@ -1,0 +1,66 @@
+name: Originals Copy
+
+# Second copy of every original photo and video (Lark task Proofer 13, David
+# 2026-11-04). R2 has no object versioning, so each night every
+# collections/<collection>/<asset>/original.* in the media bucket is copied
+# into a second bucket. Copies are server-side (nothing passes through the
+# runner) and only new or changed originals are copied.
+#
+# Nothing is ever deleted from the copy bucket: a photo deleted by mistake in
+# Proofer is still there. Restore = copy the object back by the same key.
+#
+# Scheduled workflows run from main, so this file lives on main and develop.
+on:
+  schedule:
+    # Daily at 08:40 UTC, after the 08:00 database backup.
+    - cron: "40 8 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_COPY_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_COPY_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      SOURCE: ${{ secrets.R2_MEDIA_BUCKET }}
+      DEST: ${{ secrets.R2_COPY_BUCKET }}
+    steps:
+      - name: Check settings
+        run: |
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY SOURCE DEST; do
+            if [ -z "${!v}" ]; then echo "::error::$v is not set in the staging environment"; exit 1; fi
+          done
+          if [ "$SOURCE" = "$DEST" ]; then echo "::error::The copy bucket must differ from the media bucket"; exit 1; fi
+
+      - name: Copy new originals
+        run: |
+          set -euo pipefail
+          aws s3 sync "s3://$SOURCE/collections/" "s3://$DEST/collections/" \
+            --exclude "*" --include "*/original.*" \
+            --endpoint-url "$ENDPOINT" --only-show-errors
+
+      - name: Verify every original has a copy
+        run: |
+          set -euo pipefail
+          list() {
+            aws s3api list-objects-v2 --bucket "$1" --prefix collections/ --endpoint-url "$ENDPOINT" \
+              --query 'Contents[].[Key, Size]' --output text \
+              | awk '$1 ~ /\/original\.[^\/]+$/ { print $1 "\t" $2 }' | sort
+          }
+          list "$SOURCE" > source.txt
+          list "$DEST" > copy.txt
+          missing=$(comm -23 source.txt copy.txt | wc -l)
+          echo "Originals in media bucket: $(wc -l < source.txt)"
+          echo "Originals in copy bucket:  $(wc -l < copy.txt) (deleted photos stay here)"
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing original(s) have no matching copy (same key and size):"
+            comm -23 source.txt copy.txt | head -20
+            exit 1
+          fi
+          echo "Every original has a copy."
