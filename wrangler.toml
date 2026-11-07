@@ -13,10 +13,13 @@ binding = "ASSETS"
 
 # Production reminder queue (Phase 8.3), hourly at :05 UTC, same as staging.
 # Harmless until production has its database and secrets (launch/prod-setup.md).
-# APP_BASE_URL for production goes in a [vars] block here once David picks the
-# client-facing address.
 [triggers]
 crons = ["5 * * * *"]
+
+# Public base URL for links in Stripe redirects and emails. Not a secret.
+# The client-facing address David picked 2026-10-31.
+[vars]
+APP_BASE_URL = "https://studio.davidmonroephotos.com"
 
 # Staging Worker (deployed from `develop`). Run with --env staging.
 [env.staging]
@@ -31,8 +34,7 @@ binding = "ASSETS"
 APP_BASE_URL = "https://proofer-staging.proofer.workers.dev"
 
 # Reminder queue (Phase 8.3), hourly at :05 UTC. Reminders are due at 10:00
-# Eastern, so they go out within the hour. Staging only for now; production
-# gets its own [triggers] at launch (Phase 9).
+# Eastern, so they go out within the hour. Production has its own [triggers] at the top.
 [env.staging.triggers]
 crons = ["5 * * * *"]
 

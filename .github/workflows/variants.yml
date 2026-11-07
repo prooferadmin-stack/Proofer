@@ -14,28 +14,53 @@ on:
 permissions:
   contents: read
 
-# Two overlapping runs would resize the same photos twice.
-concurrency:
-  group: photo-variants
-  cancel-in-progress: false
-
 jobs:
   variants:
+    # Staging runs develop's code with the staging environment's secrets;
+    # production runs main's code with the production environment's secrets
+    # (launch task 21). The production run skips itself until production is
+    # set up: every one of its secrets must be set ON the production
+    # environment, and main must hold the app (it does from go-live).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: staging
+            ref: develop
+          - target: production
+            ref: main
     runs-on: ubuntu-latest
-    environment: staging
+    environment: ${{ matrix.target }}
+    # Two overlapping runs on one target would resize the same photos twice.
+    concurrency:
+      group: photo-variants-${{ matrix.target }}
+      cancel-in-progress: false
     # Long enough for a few long films; the job takes at most 3 videos a run.
     timeout-minutes: 120
     steps:
-      # Staging-only until Phase 9: always run develop's code against the
-      # staging environment's secrets, even though the schedule fires from main.
       - uses: actions/checkout@v4
         with:
-          ref: develop
-      - uses: actions/setup-node@v4
+          ref: ${{ matrix.ref }}
+      - id: gate
+        env:
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BUCKET: ${{ secrets.R2_MEDIA_BUCKET }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SERVICE_KEY" ] && [ -n "$BUCKET" ] && [ -f package.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::${{ matrix.target }} isn't set up yet (secrets or app code missing); skipping."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.ready == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm ci
-      - run: npm run variants
+      - if: steps.gate.outputs.ready == 'true'
+        run: npm ci
+      - if: steps.gate.outputs.ready == 'true'
+        run: npm run variants
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -49,7 +74,7 @@ jobs:
       # hourly run stays quick when nothing new has been uploaded. They run
       # even if a photo failed above.
       - id: videos
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.gate.outputs.ready == 'true' }}
         run: npm run video-web -- --check
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}

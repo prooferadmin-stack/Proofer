@@ -1,10 +1,11 @@
 import { withSentryConfig } from "@sentry/nextjs";
 
 // Security headers on every response (launch hardening, 9.4). The content
-// security policy starts in report-only mode: browsers log what it would
-// block (DevTools console) without blocking anything. Once a few days pass
-// with nothing important reported, switch CSP_ENFORCE to true.
-const CSP_ENFORCE = false;
+// security policy is enforced (launch task 21, 2026-11-07): staging ran it in
+// report-only mode from 2026-10-15 and the public pages (home, inquire,
+// embed, book, logins) logged nothing it would block. If a page breaks,
+// set this back to false to return to report-only while you fix it.
+const CSP_ENFORCE = true;
 
 // Sites allowed to show the inquiry form in an iframe (9.3). Every other page
 // can't be framed at all. Add an origin here to allow another site.

@@ -13,11 +13,33 @@ permissions:
 
 jobs:
   backup:
+    # Staging dumps go to the bucket root (the restore drill reads them there);
+    # production dumps go under production/ in the same bucket with the same
+    # R2 token, from the PROD_SUPABASE_DB_URL repo secret (launch task 21).
+    # The production run skips itself until that secret exists.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: staging
+            db_secret: SUPABASE_DB_URL
+            prefix: ""
+          - target: production
+            db_secret: PROD_SUPABASE_DB_URL
+            prefix: production/
     runs-on: ubuntu-latest
     steps:
+      - id: gate
+        env:
+          DATABASE_URL: ${{ secrets[matrix.db_secret] }}
+        run: |
+          if [ -n "$DATABASE_URL" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::No ${{ matrix.db_secret }} secret yet; skipping the ${{ matrix.target }} backup."; echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+
       # pg_dump refuses to dump a server newer than itself, and Ubuntu's default
       # client lags Supabase (Postgres 17 on new projects), so pin 17 from PGDG.
       - name: Install PostgreSQL client
+        if: steps.gate.outputs.ready == 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
@@ -25,8 +47,9 @@ jobs:
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Dump database
+        if: steps.gate.outputs.ready == 'true'
         env:
-          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          DATABASE_URL: ${{ secrets[matrix.db_secret] }}
         run: |
           set -euo pipefail
           TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
@@ -35,11 +58,12 @@ jobs:
           echo "DUMP_FILE=$DUMP_FILE" >> "$GITHUB_ENV"
 
       - name: Upload to R2
+        if: steps.gate.outputs.ready == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
         run: |
           set -euo pipefail
-          aws s3 cp "$DUMP_FILE" "s3://proofer-backups/$DUMP_FILE" \
+          aws s3 cp "$DUMP_FILE" "s3://proofer-backups/${{ matrix.prefix }}$DUMP_FILE" \
             --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
