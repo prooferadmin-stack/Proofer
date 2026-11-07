@@ -7,7 +7,7 @@ import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
 import { presignGet, r2Configured } from "@/lib/r2";
 import { resolveGalleryAccess, resolveVisitorEmail } from "@/lib/galleries/viewer-access";
-import { GRID_SIZE, LIGHTBOX_SIZE, displayKey } from "@/lib/galleries/variants";
+import { GRID_SIZE, LIGHTBOX_SIZE, displayKey, type Variants } from "@/lib/galleries/variants";
 import { CLAIM_REFUSALS, isClaimRefusal, remainingDownloads } from "@/lib/galleries/download";
 import { addToCart, checkoutCart, clearFavoritesEmail, setCartQty, setFavoritesEmail, toggleFavorite, unlockGallery } from "./actions";
 import { Shop } from "./shop";
@@ -33,6 +33,22 @@ const FAV_ERRORS: Record<string, string> = {
 };
 
 const DOWNLOAD_NOT_READY = "This photo isn't ready to download yet. Try again in a few minutes.";
+
+// The client gallery always uses this dark, warm palette (direction C, David
+// 2026-11-07), whatever theme the visitor's browser would otherwise pick. The
+// selector outranks the theme CSS in the root layout; BrandAccent still sets
+// the accent when David has chosen one.
+const GALLERY_PALETTE =
+  "html:root:root:root{color-scheme:dark;--bg:#131210;--s0:#131210;--s1:#1b1a17;--s2:#22201c;--s3:#2a2823;--bd:#2c2a26;--bd-hi:#3d3a34;--t1:#eeeae0;--t2:#a7a194;--t3:#77726a;--acc:#8fa078;--acc-ink:#151411;--acc-soft:#8fa0781a;--acc-line:#8fa07866}";
+
+// Width / height of the grid image, so the masonry grid can lay photos out
+// before they load. Falls back to 3:2.
+function aspectRatio(a: { variants?: unknown; width?: number | null; height?: number | null }): number {
+  const v = (a.variants as Variants | null)?.[String(GRID_SIZE)];
+  if (v?.width && v?.height) return v.width / v.height;
+  if (a.width && a.height) return a.width / a.height;
+  return 1.5;
+}
 
 const FAVORITES_TAB = "favorites";
 const SHOP_TAB = "shop";
@@ -172,6 +188,7 @@ export default async function GalleryPage({
         return {
         id: a.id,
         label: `${isVideo ? "Video" : "Photo"} ${i + 1}`,
+        ratio: aspectRatio(a),
         gridUrl: isVideo ? (keys ? await presignGet(keys.poster, VIDEO_URL_TTL_SECONDS) : "") : await presignGet(displayKey(a, GRID_SIZE)),
         largeUrl: isVideo ? "" : await presignGet(displayKey(a, LIGHTBOX_SIZE)),
         video: isVideo
@@ -212,94 +229,134 @@ export default async function GalleryPage({
   const forgetEmail = clearFavoritesEmail.bind(null, collection.slug);
   const toggle = toggleFavorite.bind(null, collection.slug);
 
+  const personLeft = remaining !== null && !needsEmailToDownload ? remaining : null;
+  const freeLimit = personLimit ?? galleryLimit;
+  const photoCount = assets.length;
+
   return (
     <>
-    {heroUrl && (
-      <header className="hero">
-        <img src={heroUrl} alt="" />
-        <div className="inner">
-          {coverLogo && <img src={coverLogo} alt={brand.businessName} className="hero-logo" />}
+      <style>{GALLERY_PALETTE}</style>
+      <BrandAccent />
+      <header className="ghero">
+        {heroUrl && <img src={heroUrl} alt="" />}
+        <div className="ghero-in">
+          {coverLogo ? (
+            <img src={coverLogo} alt={brand.businessName} className="ghero-logo" />
+          ) : (
+            <span className="gkicker">{brand.businessName}</span>
+          )}
           <h1>{collection.name}</h1>
-          {collection.event_date && <p className="date">{collection.event_date}</p>}
-          <a href="#photos" className="go">View gallery</a>
+          <p className="ghero-meta">
+            {collection.event_date && <span>{collection.event_date}</span>}
+            <span>
+              {photoCount} {photoCount === 1 ? "photograph" : "photographs"}
+            </span>
+          </p>
         </div>
       </header>
-    )}
-    <main className="wide" id="photos">
-      <BrandAccent />
-      {!heroUrl && <h1 className="gtitle">{collection.name}</h1>}
-      {!heroUrl && collection.event_date && <p className="gdate">{collection.event_date}</p>}
 
-      {visitorEmail ? (
-        <form action={forgetEmail} className="hint">
-          Saving favorites as <strong>{visitorEmail}</strong> <button type="submit">Not you?</button>
-        </form>
-      ) : (
-        <form action={saveEmail} className="row">
-          <label htmlFor="fav-email">
-            {personLimit !== null && downloadsOn
-              ? "Enter your email to save favorites and download"
-              : "Enter your email to save favorites"}
-          </label>
-          <input id="fav-email" name="email" type="email" autoComplete="email" required />
-          <button type="submit">Start favoriting</button>
-        </form>
-      )}
-      {fav && FAV_ERRORS[fav] && <p role="alert">{FAV_ERRORS[fav]}</p>}
-      {dlMessage && (
-        <p role="alert" className="notice">
-          {dlMessage}
-        </p>
-      )}
-      {remaining !== null && !needsEmailToDownload && (
-        <p className="hint">
-          {remaining === 0
-            ? "No downloads left. Photos you've already downloaded can be downloaded again."
-            : `${remaining} download${remaining === 1 ? "" : "s"} left. Downloading a photo again doesn't use one.`}
-        </p>
-      )}
+      <div className="gx">
+        <aside className="gside">
+          <div className="gside-in">
+            {(sets.length > 1 || visitorEmail || storeOn) && (
+              <nav aria-label="Sets" className="gsets">
+                {sets.map((set) => {
+                  const n = assets.filter((a) => a.set_id === set.id).length;
+                  return set.id === activeTab ? (
+                    <strong key={set.id} aria-current="page">
+                      {set.name} <span>{n}</span>
+                    </strong>
+                  ) : (
+                    <Link key={set.id} href={`/g/${collection.slug}?set=${set.id}`}>
+                      {set.name} <span>{n}</span>
+                    </Link>
+                  );
+                })}
+                {visitorEmail &&
+                  (showFavorites ? (
+                    <strong aria-current="page">
+                      Favorites <span>{favoriteIds.size}</span>
+                    </strong>
+                  ) : (
+                    <Link href={`/g/${collection.slug}?set=${FAVORITES_TAB}`}>
+                      Favorites <span>{favoriteIds.size}</span>
+                    </Link>
+                  ))}
+                {storeOn &&
+                  (showShop ? (
+                    <strong aria-current="page">Shop</strong>
+                  ) : (
+                    <Link href={`/g/${collection.slug}?set=${SHOP_TAB}`}>Shop</Link>
+                  ))}
+              </nav>
+            )}
 
-      {(sets.length > 1 || visitorEmail || storeOn) && (
-        <nav aria-label="Sets" className="settabs">
-          {sets.map((set) =>
-            set.id === activeTab ? (
-              <strong key={set.id} aria-current="page">
-                {set.name}
-              </strong>
+            {personLeft !== null && freeLimit !== null && freeLimit > 0 && (
+              <div className="gbox">
+                <div className="gbox-row">
+                  <span>Free downloads left</span>
+                  <span>
+                    {personLeft} of {freeLimit}
+                  </span>
+                </div>
+                <div className="gmeter" aria-hidden="true">
+                  <i style={{ width: `${Math.round((personLeft / freeLimit) * 100)}%` }} />
+                </div>
+                <p>
+                  {personLeft === 0
+                    ? "Photos you've already downloaded can be downloaded again."
+                    : "Downloading a photo again doesn't use one."}
+                </p>
+              </div>
+            )}
+            {dlMessage && (
+              <p role="alert" className="gnote">
+                {dlMessage}
+              </p>
+            )}
+
+            {visitorEmail ? (
+              <form action={forgetEmail} className="gwho">
+                Saving favorites as <strong>{visitorEmail}</strong>{" "}
+                <button type="submit">Not you?</button>
+              </form>
             ) : (
-              <Link key={set.id} href={`/g/${collection.slug}?set=${set.id}`}>
-                {set.name}
-              </Link>
-            )
+              <form action={saveEmail} className="gmail">
+                <label htmlFor="fav-email">
+                  {personLimit !== null && downloadsOn
+                    ? "Enter your email to save favorites and download"
+                    : "Enter your email to save favorites"}
+                </label>
+                <input id="fav-email" name="email" type="email" autoComplete="email" placeholder="you@example.com" required />
+                <button type="submit">Continue</button>
+              </form>
+            )}
+            {fav && FAV_ERRORS[fav] && (
+              <p role="alert" className="gnote">
+                {FAV_ERRORS[fav]}
+              </p>
+            )}
+          </div>
+        </aside>
+
+        <main className="gmain" id="photos">
+          {showShop ? (
+            shop
+          ) : setAssets.length > 0 && !r2Configured() ? (
+            <p>Photos aren&apos;t available right now. Please try again later.</p>
+          ) : (
+            <GalleryGrid
+              key={activeTab}
+              photos={photos}
+              toggleFavorite={visitorEmail ? toggle : null}
+              emptyText={showFavorites ? "No favorites yet. Tap the heart on a photo to add it." : undefined}
+            />
           )}
-          {visitorEmail &&
-            (showFavorites ? (
-              <strong aria-current="page">Favorites ({favoriteIds.size})</strong>
-            ) : (
-              <Link href={`/g/${collection.slug}?set=${FAVORITES_TAB}`}>Favorites ({favoriteIds.size})</Link>
-            ))}
-          {storeOn &&
-            (showShop ? (
-              <strong aria-current="page">Shop</strong>
-            ) : (
-              <Link href={`/g/${collection.slug}?set=${SHOP_TAB}`}>Shop</Link>
-            ))}
-        </nav>
-      )}
-      {showShop ? (
-        shop
-      ) : setAssets.length > 0 && !r2Configured() ? (
-        <p>Photos aren&apos;t available right now. Please try again later.</p>
-      ) : (
-        <GalleryGrid
-          key={activeTab}
-          photos={photos}
-          toggleFavorite={visitorEmail ? toggle : null}
-          emptyText={showFavorites ? "No favorites yet. Tap the heart on a photo to add it." : undefined}
-        />
-      )}
-      <BrandFooter />
-    </main>
+        </main>
+      </div>
+      <div className="gfoot">
+        <BrandFooter />
+      </div>
     </>
   );
 }

@@ -4,11 +4,13 @@
 // the server; this component only decides which one to show. Downloads go
 // through /g/[slug]/download/[id], which re-checks access before signing.
 // Hearts (5.6) flip immediately and roll back if the server says no.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type GridPhoto = {
   id: string;
   label: string;
+  // Width / height, for the masonry layout before images load.
+  ratio: number;
   gridUrl: string;
   largeUrl: string;
   // null when this photo can't be downloaded (5.5): downloads off, set not
@@ -119,6 +121,31 @@ export function GalleryGrid({
 
   const [touchX, setTouchX] = useState<number | null>(null);
 
+  // Masonry in reading order: each photo goes into the shortest column, so
+  // David's order runs left to right, and every photo keeps its own shape.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [cols, setCols] = useState(3);
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      setCols(w < 560 ? 2 : w < 1100 ? 3 : 4);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const columns = useMemo(() => {
+    const c = Array.from({ length: cols }, () => ({ h: 0, items: [] as number[] }));
+    photos.forEach((p, i) => {
+      let k = 0;
+      for (let j = 1; j < cols; j++) if (c[j].h < c[k].h - 0.001) k = j;
+      c[k].items.push(i);
+      c[k].h += 1 / (p.ratio > 0 ? p.ratio : 1.5) + 0.02;
+    });
+    return c;
+  }, [photos, cols]);
+
   if (photos.length === 0) return <p className="muted">{emptyText}</p>;
 
   const current = open === null ? null : photos[open];
@@ -126,28 +153,35 @@ export function GalleryGrid({
   return (
     <>
       {favError && <p role="alert" className="err">{favError}</p>}
-      <ul className="ggrid">
-        {photos.map((photo, i) => (
-          <li key={photo.id} className="gitem">
-            <button type="button" className="gopen" onClick={() => setOpen(i)} aria-label={`Open ${photo.label}`}>
-              {photo.gridUrl ? (
-                <img src={photo.gridUrl} alt={photo.label} loading="lazy" />
-              ) : (
-                <span className="gvideo-ph">{photo.video?.src ? photo.label : "Video still processing"}</span>
-              )}
-            </button>
-            {photo.video && <span className="vbadge">▶{photo.video.duration ? ` ${photo.video.duration}` : ""}</span>}
-            <div className="gover">
-              {photo.downloadHref && (
-                <a href={photo.downloadHref} className="icon" aria-label={`Download ${photo.label}`} title="Download">
-                  ↓
-                </a>
-              )}
-              {heart(photo)}
-            </div>
-          </li>
+      <div className="gmason" ref={gridRef}>
+        {columns.map((col, k) => (
+          <ul key={k} className="gcol">
+            {col.items.map((i) => {
+              const photo = photos[i];
+              return (
+                <li key={photo.id} className="gitem">
+                  <button type="button" className="gopen" onClick={() => setOpen(i)} aria-label={`Open ${photo.label}`}>
+                    {photo.gridUrl ? (
+                      <img src={photo.gridUrl} alt={photo.label} loading="lazy" style={{ aspectRatio: String(photo.ratio) }} />
+                    ) : (
+                      <span className="gvideo-ph">{photo.video?.src ? photo.label : "Video still processing"}</span>
+                    )}
+                  </button>
+                  {photo.video && <span className="vbadge">▶{photo.video.duration ? ` ${photo.video.duration}` : ""}</span>}
+                  <div className="gover">
+                    {photo.downloadHref && (
+                      <a href={photo.downloadHref} className="icon" aria-label={`Download ${photo.label}`} title="Download">
+                        ↓
+                      </a>
+                    )}
+                    {heart(photo)}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         ))}
-      </ul>
+      </div>
 
       {current && (
         <div

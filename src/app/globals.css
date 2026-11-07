@@ -757,3 +757,55 @@ form.inline { display: inline; }
   .gc-card { border: none; background: #fff; }
   .gc-card-body, .gc-card-brand { color: #000; }
 }
+
+/* Client gallery, direction C (David 2026-11-07): full-bleed header, then a
+   sticky sidebar beside a masonry grid in reading order. */
+.ghero { position: relative; height: min(82vh, 880px); min-height: 420px; overflow: hidden; background: #1b1914; color: #fff; }
+.ghero > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ghero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.66), rgba(0,0,0,0.06) 55%, rgba(0,0,0,0.2)); }
+.ghero-in { position: absolute; left: 0; bottom: 0; z-index: 1; padding: 48px 44px; max-width: 1100px; }
+.gkicker { display: block; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; font-weight: 700; color: rgba(255,255,255,0.86); }
+.ghero-logo { display: block; max-height: 44px; max-width: 200px; object-fit: contain; }
+.ghero h1 { color: #fff; font-size: clamp(40px, 7vw, 96px); line-height: 0.95; letter-spacing: -0.03em; font-weight: 700; margin: 16px 0 14px; padding: 0; border: 0; text-shadow: 0 2px 30px rgba(0,0,0,0.3); }
+.ghero-meta { display: flex; gap: 22px; flex-wrap: wrap; font-size: 14px; color: rgba(255,255,255,0.86); margin: 0; }
+.gx { display: grid; grid-template-columns: 300px minmax(0, 1fr); background: var(--bg); }
+.gside { border-right: 1px solid var(--bd); }
+.gside-in { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; padding: 36px 28px; display: flex; flex-direction: column; gap: 26px; }
+.gsets { display: flex; flex-direction: column; }
+.gsets a, .gsets strong { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--bd); font-size: 14px; color: var(--t2); font-weight: 400; }
+.gsets a:hover { color: var(--t1); text-decoration: none; }
+.gsets strong { color: var(--t1); box-shadow: inset 2px 0 0 var(--acc); padding-left: 12px; margin-left: -14px; }
+.gsets span { color: var(--t3); font-variant-numeric: tabular-nums; }
+.gbox { background: var(--s1); border: 1px solid var(--bd); padding: 18px; font-size: 13px; color: var(--t2); }
+.gbox-row { display: flex; justify-content: space-between; }
+.gbox-row span:last-child { color: var(--t1); font-variant-numeric: tabular-nums; }
+.gbox p { margin: 0; font-size: 12px; color: var(--t3); }
+.gmeter { height: 4px; background: var(--bd); margin: 12px 0; }
+.gmeter i { display: block; height: 100%; background: var(--acc); }
+.gnote { margin: 0; padding: 12px 14px; border-left: 2px solid var(--acc); background: var(--s1); font-size: 13px; color: var(--t1); }
+.gmail { display: flex; flex-direction: column; gap: 10px; }
+.gmail label { font-size: 13px; color: var(--t2); }
+.gmail input { width: 100%; background: var(--s1); border: 1px solid var(--bd); color: var(--t1); padding: 11px 12px; font-size: 14px; }
+.gmail button, .gwho button { align-self: flex-start; background: var(--acc); color: var(--acc-ink); border: 1px solid var(--acc); padding: 10px 18px; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; cursor: pointer; }
+.gwho { font-size: 13px; color: var(--t2); line-height: 1.6; }
+.gwho strong { color: var(--t1); font-weight: 500; word-break: break-all; }
+.gwho button { background: none; color: var(--acc); border: 0; padding: 0; letter-spacing: 0; text-transform: none; font-size: 13px; text-decoration: underline; }
+.gmain { padding: 28px 28px 96px; min-width: 0; }
+.gmason { display: flex; gap: 12px; align-items: flex-start; }
+.gcol { list-style: none; margin: 0; padding: 0 !important; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.gcol .gitem { margin: 0 !important; border-radius: 2px; }
+.gcol .gitem img { width: 100%; height: auto; min-height: 0; display: block; object-fit: cover; }
+.gfoot { border-top: 1px solid var(--bd); background: var(--bg); padding: 28px 20px 40px; text-align: center; color: var(--t3); font-size: 13px; }
+.gfoot .brand-foot { margin: 0; }
+@media (max-width: 900px) {
+  .gx { grid-template-columns: 1fr; }
+  .gside { border-right: 0; border-bottom: 1px solid var(--bd); }
+  .gside-in { position: static; max-height: none; padding: 20px 16px; gap: 16px; }
+  .gsets { flex-direction: row; gap: 8px; overflow-x: auto; }
+  .gsets a, .gsets strong { border: 1px solid var(--bd); border-radius: 999px; padding: 7px 14px; white-space: nowrap; margin: 0; box-shadow: none; }
+  .gsets strong { border-color: var(--acc-line); background: var(--acc-soft); }
+  .gmain { padding: 8px 8px 72px; }
+  .gmason, .gcol { gap: 6px; }
+  .ghero { height: 66vh; min-height: 360px; }
+  .ghero-in { padding: 28px 20px; }
+}
