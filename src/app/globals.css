@@ -809,3 +809,9 @@ form.inline { display: inline; }
   .ghero { height: 66vh; min-height: 360px; }
   .ghero-in { padding: 28px 20px; }
 }
+/* Phones and tablets (no hover): no fade over the photo; the small buttons
+   carry their own backing instead (David 2026-11-07). */
+@media (hover: none) {
+  .gover { background: none; padding: 8px; gap: 6px; }
+  .gover .icon { min-width: 30px; height: 30px; padding: 0 8px; font-size: 14px; background: rgba(19,18,16,0.62) !important; border-color: rgba(255,255,255,0.28) !important; }
+}
