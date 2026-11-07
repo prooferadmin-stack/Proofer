@@ -5,6 +5,8 @@
 // through /g/[slug]/download/[id], which re-checks access before signing.
 // Hearts (5.6) flip immediately and roll back if the server says no.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SELECT_EVENT } from "./buy-more";
+import { MAX_PHOTOS_PER_PURCHASE, quote } from "@/lib/galleries/paid-downloads";
 
 export type GridPhoto = {
   id: string;
@@ -17,22 +19,62 @@ export type GridPhoto = {
   // downloadable, or the visitor must give their email first.
   downloadHref: string | null;
   favorited: boolean;
+  // Paid extra downloads (5.7): in a downloadable set, and already the
+  // visitor's (granted, free or bought), so it can't be picked to buy.
+  buyable?: boolean;
+  owned?: boolean;
   // Videos (Phase 6): the web copy's presigned URL, null while the hourly
   // job is still making it. gridUrl is the poster frame.
   video?: { src: string | null; duration: string | null };
 };
 
+export type BuyOffer = {
+  priceCents: number;
+  freeLeft: number | null;
+  action: (formData: FormData) => Promise<void>;
+};
+
 type ToggleFavorite = (assetId: string) => Promise<{ ok: true; favorited: boolean } | { ok: false; error: string }>;
+
+function usd(cents: number): string {
+  return `${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
+}
 
 export function GalleryGrid({
   photos,
   toggleFavorite,
   emptyText = "No photos in this set yet.",
+  buy = null,
 }: {
   photos: GridPhoto[];
   toggleFavorite: ToggleFavorite | null;
   emptyText?: string;
+  buy?: BuyOffer | null;
 }) {
+  // Select mode (5.7): tiles toggle a pick instead of opening the lightbox.
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!buy) return;
+    const on = () => {
+      setSelecting(true);
+      document.getElementById("photos")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.addEventListener(SELECT_EVENT, on);
+    return () => window.removeEventListener(SELECT_EVENT, on);
+  }, [buy]);
+  const canPick = (p: GridPhoto) => !!buy && p.buyable === true && !p.owned && !p.video;
+  const togglePick = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < MAX_PHOTOS_PER_PURCHASE) next.add(id);
+      return next;
+    });
+  const stopSelecting = () => {
+    setSelecting(false);
+    setPicked(new Set());
+  };
   const [open, setOpen] = useState<number | null>(null);
   const [favorites, setFavorites] = useState(() => new Set(photos.filter((p) => p.favorited).map((p) => p.id)));
   const [favError, setFavError] = useState<string | null>(null);
@@ -159,16 +201,27 @@ export function GalleryGrid({
             {col.items.map((i) => {
               const photo = photos[i];
               return (
-                <li key={photo.id} className="gitem">
-                  <button type="button" className="gopen" onClick={() => setOpen(i)} aria-label={`Open ${photo.label}`}>
+                <li
+                  key={photo.id}
+                  className={`gitem${selecting ? (canPick(photo) ? " pickable" : " unpickable") : ""}${picked.has(photo.id) ? " picked" : ""}`}
+                >
+                  <button
+                    type="button"
+                    className="gopen"
+                    onClick={() => (selecting ? canPick(photo) && togglePick(photo.id) : setOpen(i))}
+                    aria-label={selecting ? (canPick(photo) ? `${picked.has(photo.id) ? "Unpick" : "Pick"} ${photo.label}` : `${photo.label} is already yours`) : `Open ${photo.label}`}
+                    aria-pressed={selecting && canPick(photo) ? picked.has(photo.id) : undefined}
+                  >
                     {photo.gridUrl ? (
                       <img src={photo.gridUrl} alt={photo.label} loading="lazy" style={{ aspectRatio: String(photo.ratio) }} />
                     ) : (
                       <span className="gvideo-ph">{photo.video?.src ? photo.label : "Video still processing"}</span>
                     )}
                   </button>
+                  {selecting && canPick(photo) && <span className="gpick" aria-hidden="true">✓</span>}
+                  {selecting && photo.owned && <span className="gown">Yours</span>}
                   {photo.video && <span className="vbadge">▶{photo.video.duration ? ` ${photo.video.duration}` : ""}</span>}
-                  <div className="gover">
+                  <div className="gover" hidden={selecting}>
                     {photo.downloadHref && (
                       <a href={photo.downloadHref} className="icon" aria-label={`Download ${photo.label}`} title="Download">
                         ↓
@@ -182,6 +235,38 @@ export function GalleryGrid({
           </ul>
         ))}
       </div>
+
+      {buy && selecting && (
+        <form action={buy.action} className="gbar">
+          {[...picked].map((id) => (
+            <input key={id} type="hidden" name="asset" value={id} />
+          ))}
+          <div className="gbar-sum">
+            {(() => {
+              const q = quote(picked.size, buy.freeLeft, buy.priceCents);
+              if (picked.size === 0) return <>Tap the photos you want · <b>{usd(buy.priceCents)}</b> each after your free ones</>;
+              return (
+                <>
+                  <b>{picked.size} picked</b>
+                  {q.free > 0 && <> · {q.free} free</>}
+                  {q.paid > 0 && (
+                    <>
+                      {" "}
+                      · {q.paid} × {usd(buy.priceCents)} = <b>{usd(q.totalCents)}</b>
+                    </>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+          <button type="button" className="gbar-cancel" onClick={stopSelecting}>
+            Cancel
+          </button>
+          <button type="submit" className="gbar-go" disabled={picked.size === 0}>
+            {quote(picked.size, buy.freeLeft, buy.priceCents).paid > 0 ? "Continue to payment →" : "Get them free →"}
+          </button>
+        </form>
+      )}
 
       {current && (
         <div

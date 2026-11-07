@@ -24,7 +24,9 @@ export type TemplateKey =
   | "questionnaire_reminder"
   | "gift_card_purchased"
   | "invoice_paid_by_gift_card"
-  | "gift_card_sold_notice";
+  | "gift_card_sold_notice"
+  | "downloads_purchased"
+  | "downloads_sold_notice";
 
 export type TemplateDef = {
   key: TemplateKey;
@@ -275,6 +277,46 @@ David`,
       "card.summary": "$490 · Headshot Session at today's price",
       "card.paid": "$392",
       "card.admin_link": "https://example.com/admin/gift-cards/1234",
+    },
+  },
+  downloads_purchased: {
+    key: "downloads_purchased",
+    name: "Extra downloads bought",
+    description: "Goes to the buyer once their payment for extra downloads clears.",
+    fields: ["buyer.email", "gallery.name", "downloads.count", "downloads.paid", "gallery.link"],
+    subject: "Your photos are ready to download",
+    body: `Hi,
+
+Thank you. Your {{downloads.count}} extra photos from {{gallery.name}} are ready, and you paid {{downloads.paid}}.
+
+Open the gallery with this email ({{buyer.email}}) and download them any time:
+
+{{gallery.link}}
+
+David`,
+    sample: {
+      "buyer.email": "sam@example.com",
+      "gallery.name": "Ellis Family Session",
+      "downloads.count": "7",
+      "downloads.paid": "$105",
+      "gallery.link": "https://example.com/g/ellis-family",
+    },
+  },
+  downloads_sold_notice: {
+    key: "downloads_sold_notice",
+    name: "Extra downloads sold (note to you)",
+    description: "Goes to you when a client buys extra downloads.",
+    fields: ["buyer.email", "gallery.name", "downloads.count", "downloads.paid", "invoice.admin_link"],
+    subject: "Extra downloads sold: {{gallery.name}}",
+    body: `{{buyer.email}} bought {{downloads.count}} extra photos from {{gallery.name}} for {{downloads.paid}}.
+
+{{invoice.admin_link}}`,
+    sample: {
+      "buyer.email": "sam@example.com",
+      "gallery.name": "Ellis Family Session",
+      "downloads.count": "7",
+      "downloads.paid": "$105",
+      "invoice.admin_link": "https://example.com/admin/invoices/1234",
     },
   },
   booking_confirmation: {

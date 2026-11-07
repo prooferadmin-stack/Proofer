@@ -415,3 +415,42 @@ export async function onGiftCardIssued(stripeEventId: string, purchaseId: string
     });
   });
 }
+
+// Paid extra downloads (5.7): receipt to the buyer's gallery email (not the
+// project client, who may be someone else) and a note to David. Never throws.
+export async function onDownloadsBought(stripeEventId: string, purchaseId: string) {
+  const db = supabaseAdmin();
+  const { data: p, error } = await db
+    .from("download_purchases")
+    .select("id, visitor_key, photo_count, amount_cents, invoice_id, collections(name, slug)")
+    .eq("id", purchaseId)
+    .maybeSingle();
+  if (error || !p) {
+    console.error(`email trigger failed: download purchase ${stripeEventId}`, error ?? "purchase not found");
+    return;
+  }
+  const col = p.collections as unknown as { name: string; slug: string } | null;
+  const base = await appBaseUrl();
+  const fields = {
+    "buyer.email": String(p.visitor_key),
+    "gallery.name": col?.name ?? "your gallery",
+    "downloads.count": String(p.photo_count),
+    "downloads.paid": formatCents(Number(p.amount_cents)),
+  };
+  await safely(`download purchase ${p.id} (buyer)`, async () => {
+    await sendTemplatedEmail({
+      key: "downloads_purchased",
+      to: String(p.visitor_key),
+      fields: { ...fields, "gallery.link": col ? absoluteUrl(base, `/g/${col.slug}`) : base },
+      idempotencyKey: idempotencyKeys.downloadsPurchased(p.id as string),
+    });
+  });
+  await safely(`download purchase ${p.id} (David)`, async () => {
+    await sendTemplatedEmail({
+      key: "downloads_sold_notice",
+      to: ADMIN_EMAILS[0],
+      fields: { ...fields, "invoice.admin_link": absoluteUrl(base, `/admin/invoices/${p.invoice_id}`) },
+      idempotencyKey: idempotencyKeys.downloadsSoldNotice(p.id as string),
+    });
+  });
+}

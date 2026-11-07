@@ -62,3 +62,14 @@ test("a gift card sale Stripe took but Proofer never issued is flagged", () => {
   assert.deepEqual(r.rows.map((x) => x.status), ["stripe_only"]);
   assert.equal(r.giftCardAppliedTotal, 0);
 });
+
+test("a download purchase (5.7) reconciles as an invoice payment", () => {
+  const r = reconcile(
+    [{ sessionId: "cs_dl", amountCents: 10500, currency: "usd", created: "2026-11-07T10:00:00Z", kind: "invoice", invoiceId: null }],
+    [{ sessionId: "cs_dl", invoiceId: "inv-dl", amountCents: 10500, outcome: "downloads_granted", receivedAt: "2026-11-07T10:00:01Z" }]
+  );
+  assert.equal(r.rows[0].status, "ok");
+  assert.equal(r.rows[0].invoiceId, "inv-dl");
+  assert.equal(r.stripeTotal, 10500);
+  assert.equal(r.appliedTotal, 10500);
+});

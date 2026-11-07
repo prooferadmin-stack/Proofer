@@ -41,7 +41,8 @@ export default async function ReconcilePage() {
         amountCents: sess.amount_total ?? 0,
         currency: sess.currency ?? "usd",
         created: new Date(sess.created * 1000).toISOString(),
-        kind: sess.metadata?.invoice_id
+        // Download purchases (5.7) become paid invoices, so they count as invoice payments.
+        kind: sess.metadata?.invoice_id || sess.metadata?.kind === "download_purchase"
           ? "invoice"
           : sess.metadata?.kind === "store_order"
             ? "store"

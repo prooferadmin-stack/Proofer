@@ -5,6 +5,7 @@
 // throwing), then uses the service-role client directly. Validation mirrors
 // the DB checks in 0011_galleries.sql.
 import { revalidatePath } from "next/cache";
+import { parsePriceDollars } from "@/lib/galleries/paid-downloads";
 import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/auth/require-admin";
@@ -503,6 +504,8 @@ export async function updateDownloadSettings(id: string, formData: FormData) {
       download_size: size,
       download_limit: parseLimit(String(formData.get("download_limit") ?? "")),
       per_person_download_limit: parseLimit(String(formData.get("per_person_download_limit") ?? "")),
+      // Paid extra downloads (5.7): blank = buying off.
+      extra_download_price_cents: parsePriceDollars(String(formData.get("extra_download_price") ?? "")),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);

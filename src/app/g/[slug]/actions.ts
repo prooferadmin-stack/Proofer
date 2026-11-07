@@ -7,7 +7,8 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
-import { isRateLimited } from "@/lib/rate-limit";
+import { isRateLimited, isRateLimitedFor } from "@/lib/rate-limit";
+import { pickedIds } from "@/lib/galleries/paid-downloads";
 import {
   MAX_PASSWORD_LENGTH,
   UNLOCK_TTL_SECONDS,
@@ -247,4 +248,73 @@ export async function checkoutCart(slug: string) {
   // The cart stays until the order is recorded (7.3); a canceled Checkout
   // comes back to the same cart.
   redirect(session.url);
+}
+
+// Paid extra downloads (5.7). The visitor's picks are only a filter:
+// start_download_purchase() (migration 0034) re-reads the gallery, grants the
+// free ones first, and fixes the price and count. Checkout charges exactly
+// that amount; only the verified webhook grants the bought photos.
+export async function buyDownloads(slug: string, formData: FormData) {
+  const result = await resolveGalleryAccess(slug);
+  if (!result || result.access !== "granted") redirect(SLUG_PATTERN.test(slug) ? `/g/${slug}` : "/");
+  const { collection } = result;
+  const back = `/g/${collection.slug}`;
+
+  const ip = clientIp(await headers());
+  const WINDOW = 15 * 60 * 1000;
+  const byIp = isRateLimitedFor(`dl-buy-ip:${ip}`, 10, WINDOW);
+  const byGallery = isRateLimitedFor(`dl-buy-gallery:${collection.id}`, 40, WINDOW);
+  if (byIp || byGallery) redirect(`${back}?buy=limited`);
+
+  const visitor = await resolveVisitorEmail(collection.id);
+  if (!visitor) redirect(`${back}?buy=need_email`);
+
+  const all = formData.get("all") === "1";
+  const ids = all ? [] : pickedIds(formData.getAll("asset"));
+  if (!all && ids.length === 0) redirect(`${back}?buy=none`);
+
+  const db = supabaseAdmin();
+  const { data, error } = await db.rpc("start_download_purchase", {
+    p_collection_id: collection.id,
+    p_visitor_key: visitor,
+    p_asset_ids: ids,
+    p_all: all,
+  });
+  if (error) throw error;
+  const r = data as { ok: boolean; reason?: string; free_granted?: number; purchase_id?: string | null; photo_count?: number; unit_cents?: number };
+  if (!r.ok) redirect(`${back}?buy=${encodeURIComponent(r.reason ?? "unavailable")}`);
+  if (!r.purchase_id) redirect(`${back}?buy=free&n=${Number(r.free_granted ?? 0)}`);
+
+  const baseUrl = env.appBaseUrl();
+  const free = Number(r.free_granted ?? 0);
+  const checkout = await stripe().checkout.sessions.create({
+    mode: "payment",
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: { name: `Extra downloads: ${collection.name}` },
+          unit_amount: Number(r.unit_cents),
+        },
+        quantity: Number(r.photo_count),
+      },
+    ],
+    customer_email: visitor,
+    client_reference_id: r.purchase_id,
+    metadata: { kind: "download_purchase", download_purchase_id: r.purchase_id },
+    payment_intent_data: { metadata: { kind: "download_purchase", download_purchase_id: r.purchase_id } },
+    success_url: `${baseUrl}${back}?buy=paid`,
+    cancel_url: `${baseUrl}${back}?buy=cancelled${free > 0 ? `&n=${free}` : ""}`,
+  });
+  if (!checkout.url) throw new Error("Stripe did not return a Checkout URL");
+
+  const { error: updateError } = await db
+    .from("download_purchases")
+    .update({ stripe_checkout_session_id: checkout.id })
+    .eq("id", r.purchase_id)
+    .eq("status", "pending")
+    .is("stripe_checkout_session_id", null);
+  if (updateError) throw updateError;
+
+  redirect(checkout.url);
 }

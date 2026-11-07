@@ -18,6 +18,7 @@ export type Collection = {
   download_size?: string;
   download_limit?: number | null;
   per_person_download_limit?: number | null;
+  extra_download_price_cents?: number | null;
   created_at: string;
   updated_at: string;
 };

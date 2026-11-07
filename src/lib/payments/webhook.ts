@@ -11,6 +11,8 @@ export type EventPayment = {
   // Set when the session paid for a gift card (2.7). Never set together
   // with invoiceId.
   giftCardPurchaseId: string | null;
+  // Paid extra downloads (5.7).
+  downloadPurchaseId: string | null;
   sessionId: string | null;
   paymentIntentId: string | null;
   amountCents: number | null;
@@ -23,6 +25,7 @@ const NONE: EventPayment = {
   invoiceId: null,
   installmentId: null,
   giftCardPurchaseId: null,
+  downloadPurchaseId: null,
   sessionId: null,
   paymentIntentId: null,
   amountCents: null,
@@ -58,6 +61,18 @@ function giftCardPurchaseIdOf(session: Stripe.Checkout.Session): string | null {
   return meta.toLowerCase();
 }
 
+function downloadPurchaseIdOf(session: Stripe.Checkout.Session): string | null {
+  if (session.metadata?.kind !== "download_purchase" || session.metadata?.invoice_id) return null;
+  const meta = session.metadata?.download_purchase_id ?? null;
+  const ref = session.client_reference_id ?? null;
+  if (!meta || !UUID_PATTERN.test(meta) || ref !== meta) return null;
+  return meta.toLowerCase();
+}
+
+// Sessions that are not invoice payments never pay an invoice, whatever
+// other metadata they carry.
+const NOT_INVOICE_KINDS = new Set(["gift_card", "download_purchase"]);
+
 export function paymentFromEvent(event: Stripe.Event): EventPayment {
   switch (event.type) {
     case "checkout.session.completed":
@@ -66,12 +81,13 @@ export function paymentFromEvent(event: Stripe.Event): EventPayment {
     case "checkout.session.expired": {
       const s = event.data.object as Stripe.Checkout.Session;
       const giftCardPurchaseId = giftCardPurchaseIdOf(s);
+      const downloadPurchaseId = downloadPurchaseIdOf(s);
       // A session that claims to be a gift card never pays an invoice.
-      const invoiceId = s.metadata?.kind === "gift_card" ? null : invoiceIdOf(s);
+      const invoiceId = NOT_INVOICE_KINDS.has(s.metadata?.kind ?? "") ? null : invoiceIdOf(s);
       // "completed" with payment_status "unpaid" is a delayed method (bank
       // debit); the money only counts once async_payment_succeeded arrives.
       const markPaid =
-        (invoiceId !== null || giftCardPurchaseId !== null) &&
+        (invoiceId !== null || giftCardPurchaseId !== null || downloadPurchaseId !== null) &&
         s.mode === "payment" &&
         ((event.type === "checkout.session.completed" && s.payment_status === "paid") ||
           event.type === "checkout.session.async_payment_succeeded");
@@ -79,6 +95,7 @@ export function paymentFromEvent(event: Stripe.Event): EventPayment {
         invoiceId,
         installmentId: invoiceId === null ? null : installmentIdOf(s),
         giftCardPurchaseId,
+        downloadPurchaseId,
         sessionId: s.id,
         paymentIntentId: idOf(s.payment_intent),
         amountCents: s.amount_total ?? null,

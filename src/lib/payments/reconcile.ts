@@ -33,7 +33,9 @@ export type ReconRow = {
   note: string;
 };
 
-const APPLIED = new Set(["paid", "installment_paid", "gift_card_issued"]);
+// downloads_granted (5.7): a download purchase becomes a paid invoice, so it
+// counts with invoice payments.
+const APPLIED = new Set(["paid", "installment_paid", "gift_card_issued", "downloads_granted"]);
 
 export type ReconResult = {
   rows: ReconRow[];
@@ -56,7 +58,7 @@ export function reconcile(stripe: StripePaid[], events: AppliedEvent[]): ReconRe
     const evs = bySession.get(s.sessionId) ?? [];
     const applied = evs.find((e) => APPLIED.has(e.outcome));
     const flagged = evs.find((e) => !APPLIED.has(e.outcome) && e.outcome !== "recorded");
-    const base = { sessionId: s.sessionId, invoiceId: s.invoiceId, amountCents: s.amountCents, when: s.created };
+    const base = { sessionId: s.sessionId, invoiceId: s.invoiceId ?? applied?.invoiceId ?? null, amountCents: s.amountCents, when: s.created };
     if (applied) {
       rows.push(
         applied.amountCents === s.amountCents

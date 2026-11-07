@@ -9,7 +9,9 @@ import { presignGet, r2Configured } from "@/lib/r2";
 import { resolveGalleryAccess, resolveVisitorEmail } from "@/lib/galleries/viewer-access";
 import { GRID_SIZE, LIGHTBOX_SIZE, displayKey, type Variants } from "@/lib/galleries/variants";
 import { CLAIM_REFUSALS, isClaimRefusal, remainingDownloads } from "@/lib/galleries/download";
-import { addToCart, checkoutCart, clearFavoritesEmail, setCartQty, setFavoritesEmail, toggleFavorite, unlockGallery } from "./actions";
+import { BuyMoreButton } from "./buy-more";
+import { quote } from "@/lib/galleries/paid-downloads";
+import { addToCart, buyDownloads, checkoutCart, clearFavoritesEmail, setCartQty, setFavoritesEmail, toggleFavorite, unlockGallery } from "./actions";
 import { Shop } from "./shop";
 import { pricedCart } from "@/lib/store/cart";
 import { loadCatalog, readCart } from "@/lib/store/gallery-store";
@@ -32,6 +34,18 @@ const FAV_ERRORS: Record<string, string> = {
   unavailable: "Favorites aren't available right now.",
 };
 
+// Paid extra downloads (5.7): what ?buy= tells the visitor.
+const BUY_MESSAGES: Record<string, string> = {
+  paid: "Thank you. Your photos are unlocked as soon as the payment clears, usually within a minute; reload if they aren't yet. A receipt is on its way to your email.",
+  cancelled: "No payment was taken.",
+  free: "Those fit in your free downloads, so there was nothing to pay. Download them below.",
+  none: "Pick at least one photo first.",
+  need_email: "Enter your email first, then pick the photos you want.",
+  limited: "Too many attempts. Please wait a few minutes and try again.",
+  too_many: "That's more than 500 photos at once. Please pick fewer.",
+};
+const BUY_UNAVAILABLE = "Buying more downloads isn't available for this gallery right now.";
+
 const DOWNLOAD_NOT_READY = "This photo isn't ready to download yet. Try again in a few minutes.";
 
 // The client gallery always uses this dark, warm palette (direction C, David
@@ -53,15 +67,19 @@ function aspectRatio(a: { variants?: unknown; width?: number | null; height?: nu
 const FAVORITES_TAB = "favorites";
 const SHOP_TAB = "shop";
 
+function formatUsd(cents: number): string {
+  return `${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
+}
+
 export default async function GalleryPage({
   params,
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ error?: string; set?: string; fav?: string; dl?: string; cart?: string }>;
+  searchParams: Promise<{ error?: string; set?: string; fav?: string; dl?: string; cart?: string; buy?: string; n?: string }>;
 }) {
   const { slug } = await params;
-  const { error, set: setParam, fav, dl, cart: cartMessage } = await searchParams;
+  const { error, set: setParam, fav, dl, cart: cartMessage, buy, n: buyFree } = await searchParams;
 
   const result = await resolveGalleryAccess(slug);
   if (!result) notFound();
@@ -141,6 +159,7 @@ export default async function GalleryPage({
   const galleryLimit = (coverRow?.download_limit as number | null) ?? null;
   const personLimit = (coverRow?.per_person_download_limit as number | null) ?? null;
   let remaining: number | null = null;
+  let ownedIds = new Set<string>();
   if (downloadsOn && (galleryLimit !== null || personLimit !== null)) {
     const { data: grants, error: grantsErr } = await db
       .from("download_grants")
@@ -148,6 +167,7 @@ export default async function GalleryPage({
       .eq("collection_id", collection.id);
     if (grantsErr) throw grantsErr;
     const rows = grants ?? [];
+    if (visitorEmail) ownedIds = new Set(rows.filter((g) => g.visitor_key === visitorEmail).map((g) => g.asset_id));
     remaining = remainingDownloads({
       galleryLimit,
       galleryUsed: new Set(rows.map((g) => g.asset_id)).size,
@@ -156,6 +176,22 @@ export default async function GalleryPage({
     });
   }
   const needsEmailToDownload = downloadsOn && personLimit !== null && !visitorEmail;
+
+  // Paid extra downloads (5.7). Read on their own so the page still works
+  // before migration 0034; the database re-checks everything at purchase.
+  let priceCents: number | null = null;
+  if (downloadsOn && (galleryLimit !== null || personLimit !== null)) {
+    const [{ data: priceRow }, { data: blocker, error: blockerErr }] = await Promise.all([
+      db.from("collections").select("extra_download_price_cents").eq("id", collection.id).maybeSingle(),
+      db.rpc("download_purchase_blocker", { p_collection_id: collection.id }),
+    ]);
+    if (!blockerErr && blocker === null && priceRow?.extra_download_price_cents) priceCents = Number(priceRow.extra_download_price_cents);
+  }
+  const buyOn = priceCents !== null;
+  const buyable = assets.filter((a) => downloadableSets.has(a.set_id) && !ownedIds.has(a.id));
+  const buyAllQuote = buyOn ? quote(buyable.length, remaining, priceCents!) : null;
+  const buyMessage = buy ? (BUY_MESSAGES[buy] ?? BUY_UNAVAILABLE) : null;
+  const buyFreeCount = Number(buyFree ?? 0);
   const dlMessage = dl === "not_ready" ? DOWNLOAD_NOT_READY : dl && isClaimRefusal(dl) ? CLAIM_REFUSALS[dl] : null;
 
   // Store (7.2): a Shop tab when David has turned the store on. Read on its
@@ -199,6 +235,8 @@ export default async function GalleryPage({
             ? `/g/${collection.slug}/download/${a.id}`
             : null,
         favorited: favoriteIds.has(a.id),
+        buyable: downloadableSets.has(a.set_id),
+        owned: ownedIds.has(a.id),
         };
       })
     );
@@ -307,11 +345,38 @@ export default async function GalleryPage({
                     ? "Photos you've already downloaded can be downloaded again."
                     : "Downloading a photo again doesn't use one."}
                 </p>
+                {buyOn && (
+                  <div className="gbuy">
+                    <BuyMoreButton />
+                    {buyAllQuote && buyable.length > 0 && (
+                      <form action={buyDownloads.bind(null, collection.slug)}>
+                        <input type="hidden" name="all" value="1" />
+                        <button type="submit" className="gbuy-all">
+                          {buyAllQuote.paid > 0
+                            ? `Buy all remaining: ${buyable.length} photos, ${formatUsd(buyAllQuote.totalCents)}`
+                            : `Get all remaining ${buyable.length} free`}
+                        </button>
+                      </form>
+                    )}
+                    <p>{formatUsd(priceCents!)} per photo after your free ones.</p>
+                  </div>
+                )}
               </div>
+            )}
+            {buyOn && needsEmailToDownload && (
+              <p className="gnote">Enter your email below to download, or to buy more photos at {formatUsd(priceCents!)} each.</p>
+            )}
+            {buyMessage && (
+              <p role="status" className="gnote">
+                {buyMessage}
+                {buy === "cancelled" && buyFreeCount > 0 ? ` ${buyFreeCount} of your picks fit in your free downloads and are ready.` : ""}
+              </p>
             )}
             {dlMessage && (
               <p role="alert" className="gnote">
-                {dlMessage}
+                {buyOn && (dl === "person_limit" || dl === "gallery_limit")
+                  ? `You've used your free downloads. You can buy more at ${formatUsd(priceCents!)} a photo with Buy more downloads.`
+                  : dlMessage}
               </p>
             )}
 
@@ -349,6 +414,11 @@ export default async function GalleryPage({
               key={activeTab}
               photos={photos}
               toggleFavorite={visitorEmail ? toggle : null}
+              buy={
+                buyOn && visitorEmail
+                  ? { priceCents: priceCents!, freeLeft: remaining, action: buyDownloads.bind(null, collection.slug) }
+                  : null
+              }
               emptyText={showFavorites ? "No favorites yet. Tap the heart on a photo to add it." : undefined}
             />
           )}

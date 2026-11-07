@@ -33,6 +33,7 @@ test("a paid checkout.session.completed marks the invoice paid", () => {
     invoiceId: INVOICE,
     installmentId: null,
     giftCardPurchaseId: null,
+    downloadPurchaseId: null,
     sessionId: "cs_test_1",
     paymentIntentId: "pi_1",
     amountCents: 53500,
@@ -100,6 +101,7 @@ test("charge.refunded carries the payment intent and refunded amount only", () =
     invoiceId: null,
     installmentId: null,
     giftCardPurchaseId: null,
+    downloadPurchaseId: null,
     sessionId: null,
     paymentIntentId: "pi_1",
     amountCents: 1000,
@@ -193,4 +195,42 @@ test("invoice sessions never carry a gift card purchase", () => {
   const p = paymentFromEvent(sessionEvent("checkout.session.completed", { metadata: { invoice_id: INVOICE, gift_card_purchase_id: PURCHASE } }));
   assert.equal(p.invoiceId, INVOICE);
   assert.equal(p.giftCardPurchaseId, null);
+});
+
+// Paid extra downloads (5.7).
+const DL = "6f1c2b9e-1d4a-4c7e-9b2a-3e5f7a9c1d20";
+const dl = (extra: Record<string, unknown> = {}) => ({
+  metadata: { kind: "download_purchase", download_purchase_id: DL },
+  client_reference_id: DL,
+  ...extra,
+});
+
+test("a paid download purchase session names the purchase, never an invoice", () => {
+  const p = paymentFromEvent(sessionEvent("checkout.session.completed", dl()));
+  assert.equal(p.downloadPurchaseId, DL);
+  assert.equal(p.invoiceId, null);
+  assert.equal(p.giftCardPurchaseId, null);
+  assert.equal(p.markPaid, true);
+});
+
+test("a download purchase with an invoice id in its metadata pays nothing", () => {
+  const p = paymentFromEvent(sessionEvent("checkout.session.completed", dl({ metadata: { kind: "download_purchase", download_purchase_id: DL, invoice_id: INVOICE } })));
+  assert.equal(p.downloadPurchaseId, null);
+  assert.equal(p.invoiceId, null);
+  assert.equal(p.markPaid, false);
+});
+
+test("a download purchase needs a matching client reference and a uuid", () => {
+  for (const extra of [{ client_reference_id: "other" }, { metadata: { kind: "download_purchase", download_purchase_id: "nope" }, client_reference_id: "nope" }]) {
+    const p = paymentFromEvent(sessionEvent("checkout.session.completed", dl(extra)));
+    assert.equal(p.downloadPurchaseId, null);
+    assert.equal(p.markPaid, false);
+  }
+});
+
+test("an unpaid or expired download session is only recorded", () => {
+  assert.equal(paymentFromEvent(sessionEvent("checkout.session.completed", dl({ payment_status: "unpaid" }))).markPaid, false);
+  const e = paymentFromEvent(sessionEvent("checkout.session.expired", dl()));
+  assert.equal(e.downloadPurchaseId, DL);
+  assert.equal(e.markPaid, false);
 });

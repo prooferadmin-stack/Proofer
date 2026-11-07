@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatDay } from "@/lib/dates";
+import { formatDateTime, formatDay } from "@/lib/dates";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
 import { presignGet, r2Configured } from "@/lib/r2";
@@ -25,6 +25,8 @@ import {
 import { MIN_PASSWORD_LENGTH } from "@/lib/galleries/access";
 import { accessSecret } from "@/lib/galleries/viewer-access";
 import { DOWNLOAD_SIZES, DOWNLOAD_SIZE_LABELS } from "@/lib/galleries/download";
+import { BLOCKER_TEXT } from "@/lib/galleries/paid-downloads";
+import { formatCents } from "@/lib/email/events";
 import { CollectionFields } from "../collection-fields";
 import { Uploader } from "../uploader";
 import type { Collection, MediaAsset, PhotoSet } from "../types";
@@ -105,6 +107,26 @@ export default async function CollectionDetailPage({
   const grantsByVisitor = new Map<string, number>();
   for (const g of grants) grantsByVisitor.set(g.visitor_key, (grantsByVisitor.get(g.visitor_key) ?? 0) + 1);
   const photosDownloaded = new Set(grants.map((g) => g.asset_id)).size;
+
+  // Paid extra downloads (5.7). Read on their own so the page still works
+  // before migration 0034 adds them.
+  const { data: purchaseRows } = await db
+    .from("download_purchases")
+    .select("id, visitor_key, photo_count, amount_cents, paid_at, invoice_id, granted_count")
+    .eq("collection_id", id)
+    .eq("status", "paid")
+    .order("paid_at", { ascending: false });
+  const purchases = (purchaseRows ?? []) as {
+    id: string;
+    visitor_key: string;
+    photo_count: number;
+    amount_cents: number;
+    paid_at: string | null;
+    invoice_id: string | null;
+    granted_count: number | null;
+  }[];
+  const { data: blockerData } = await db.rpc("download_purchase_blocker", { p_collection_id: id });
+  const buyBlocker = (blockerData as string | null) ?? null;
 
   const storageReady = r2Configured();
   // The cover is the chosen photo, else the first uploaded one (same rule as the Galleries list and client page).
@@ -594,6 +616,25 @@ export default async function CollectionDetailPage({
                     defaultValue={collection.per_person_download_limit ?? ""}
                   />
                 </div>
+                <div>
+                  <label htmlFor="extra_download_price">
+                    Price per extra photo, in dollars (blank = clients can&apos;t buy more)
+                  </label>
+                  <input
+                    id="extra_download_price"
+                    name="extra_download_price"
+                    inputMode="decimal"
+                    placeholder="e.g. 15"
+                    defaultValue={
+                      collection.extra_download_price_cents != null ? (Number(collection.extra_download_price_cents) / 100).toFixed(2) : ""
+                    }
+                  />
+                </div>
+                <p className={buyBlocker ? "muted" : "hint"}>
+                  {buyBlocker
+                    ? `Buying more downloads is off: ${BLOCKER_TEXT[buyBlocker] ?? buyBlocker}`
+                    : "Clients can buy more: their free downloads are used first, then each extra photo is charged at this price and becomes a paid invoice on the gallery's project."}
+                </p>
                 <button type="submit" className="primary" style={{ marginTop: 12 }}>
                   Save downloads
                 </button>
@@ -635,6 +676,29 @@ export default async function CollectionDetailPage({
                     })}
                   </ul>
                 </>
+              )}
+
+              <h2>Bought downloads</h2>
+              {purchases.length === 0 ? (
+                <p className="muted">No downloads bought yet.</p>
+              ) : (
+                <ul>
+                  {purchases.map((p) => (
+                    <li key={p.id}>
+                      {p.visitor_key}: {p.photo_count} photo{p.photo_count === 1 ? "" : "s"}, {formatCents(p.amount_cents)}
+                      {p.paid_at ? ` · ${formatDateTime(p.paid_at)}` : ""}
+                      {p.invoice_id && (
+                        <>
+                          {" "}
+                          · <Link href={`/admin/invoices/${p.invoice_id}`}>Invoice</Link>
+                        </>
+                      )}
+                      {p.granted_count != null && p.granted_count < p.photo_count && (
+                        <span className="muted"> · {p.photo_count - p.granted_count} no longer in the gallery when paid</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
 
               <h2>Favorites</h2>

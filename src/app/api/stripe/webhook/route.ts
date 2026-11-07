@@ -10,7 +10,7 @@ import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
 import { supabaseAdmin } from "@/lib/supabase";
 import { paymentFromEvent } from "@/lib/payments/webhook";
-import { onGiftCardIssued, onPaymentReceived } from "@/lib/email/triggers";
+import { onDownloadsBought, onGiftCardIssued, onPaymentReceived } from "@/lib/email/triggers";
 import { onBookingPaid } from "@/lib/booking/confirm";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +64,33 @@ export async function POST(req: Request) {
     // Code email to the buyer and a note to David. Never throws; keyed on
     // the event id so a retry never mails twice.
     if (outcome === "gift_card_issued") await onGiftCardIssued(event.id, p.giftCardPurchaseId);
+    return NextResponse.json({ received: true });
+  }
+
+  // Paid extra downloads (5.7): fulfill_download_purchase() (migration 0034)
+  // writes the audit row and, for a paid session at exactly the purchase
+  // amount, creates the paid invoice and grants the photos in one transaction.
+  if (p.downloadPurchaseId) {
+    const { data: outcome, error } = await db.rpc("fulfill_download_purchase", {
+      p_event_id: event.id,
+      p_type: event.type,
+      p_livemode: event.livemode,
+      p_purchase_id: p.downloadPurchaseId,
+      p_session_id: p.sessionId,
+      p_payment_intent_id: p.paymentIntentId,
+      p_amount_cents: p.amountCents,
+      p_currency: p.currency,
+      p_mark_paid: p.markPaid,
+      p_payload: event,
+    });
+    if (error) {
+      console.error("stripe webhook: fulfill_download_purchase failed", event.id, error.message);
+      return NextResponse.json({ error: "not recorded" }, { status: 500 });
+    }
+    if (!["downloads_granted", "recorded", "duplicate"].includes(String(outcome))) {
+      console.error("stripe webhook: download purchase needs attention", event.id, event.type, outcome, p.downloadPurchaseId);
+    }
+    if (outcome === "downloads_granted") await onDownloadsBought(event.id, p.downloadPurchaseId);
     return NextResponse.json({ received: true });
   }
 
