@@ -17,6 +17,19 @@ permissions:
 
 jobs:
   drill:
+    # One drill per target, matching backup.yml (production dumps live under
+    # production/ and compare against PROD_SUPABASE_DB_URL). A target with no
+    # database secret skips itself.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: staging
+            db_secret: SUPABASE_DB_URL
+            prefix: ""
+          - target: production
+            db_secret: PROD_SUPABASE_DB_URL
+            prefix: production/
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -30,7 +43,15 @@ jobs:
     env:
       LOCAL_DB: postgresql://postgres:drill@localhost:5432/postgres
     steps:
+      - id: gate
+        env:
+          LIVE_DB: ${{ secrets[matrix.db_secret] }}
+        run: |
+          if [ -n "$LIVE_DB" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::No ${{ matrix.db_secret }} secret yet; skipping the ${{ matrix.target }} drill."; echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+
       - name: Install PostgreSQL client
+        if: steps.gate.outputs.ready == 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
@@ -38,6 +59,7 @@ jobs:
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Download latest dump from R2
+        if: steps.gate.outputs.ready == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -45,12 +67,13 @@ jobs:
         run: |
           set -euo pipefail
           ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          LATEST=$(aws s3 ls s3://proofer-backups/ --endpoint-url "$ENDPOINT" | awk '{print $4}' | grep '^proofer-.*\.sql\.gz$' | sort | tail -1)
-          if [ -z "$LATEST" ]; then echo "No dumps found in proofer-backups"; exit 1; fi
+          LATEST=$(aws s3 ls "s3://proofer-backups/${{ matrix.prefix }}" --endpoint-url "$ENDPOINT" | awk '{print $4}' | grep '^proofer-.*\.sql\.gz$' | sort | tail -1)
+          if [ -z "$LATEST" ]; then echo "No dumps found in proofer-backups/${{ matrix.prefix }}"; exit 1; fi
           echo "Restoring $LATEST"
-          aws s3 cp "s3://proofer-backups/$LATEST" dump.sql.gz --endpoint-url "$ENDPOINT"
+          aws s3 cp "s3://proofer-backups/${{ matrix.prefix }}$LATEST" dump.sql.gz --endpoint-url "$ENDPOINT"
 
       - name: Restore into throwaway Postgres
+        if: steps.gate.outputs.ready == 'true'
         run: |
           gunzip -c dump.sql.gz | psql "$LOCAL_DB" -q > restore.log 2>&1 || true
           echo "Restore finished with $(grep -c 'ERROR' restore.log || true) errors (non-public schemas expected)."
@@ -58,8 +81,9 @@ jobs:
           grep 'ERROR' restore.log | grep -i 'public' || echo "  none"
 
       - name: Compare public tables with live database
+        if: steps.gate.outputs.ready == 'true'
         env:
-          LIVE_DB: ${{ secrets.SUPABASE_DB_URL }}
+          LIVE_DB: ${{ secrets[matrix.db_secret] }}
         run: |
           set -euo pipefail
           FAIL=0
